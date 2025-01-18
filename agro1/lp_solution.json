@@ -1,9 +1,7 @@
 {
-    "method": "LinearProgramming(docplex)",
-    "status": "JobSolveStatus.OPTIMAL_SOLUTION",
-    "objective_value": 5526.0,
+    "method": "LinearProgramming",
+    "best_cost": 1050350.0,
+    "total_spoilage_cost": 690750.0,
     "detailed_routes": [],
-    "total_spoilage": 2763.0,
-    "delivered_on_time": 0,
-    "runtime_sec": 0.27
+    "runtime_sec": 0.01
 }
