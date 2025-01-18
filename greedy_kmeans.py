@@ -27,10 +27,10 @@ from sklearn.cluster import KMeans
 from copy import deepcopy
 
 # ------------- Constants/Parameters (matching ga_mutation) -------------
-SPOILAGE_PENALTY       = 150.0
+SPOILAGE_PENALTY       = 300.0
 UNMET_DEMAND_PENALTY   = 200.0
 EARLY_DELIVERY_REWARD  = 5.0
-LOADING_TIME           = 5           # Additional time for farm->hub + hub->center
+LOADING_TIME           = 70           # Additional time for farm->hub + hub->center
 OVERLOAD_PENALTY       = 1000.0
 EXCESS_PRODUCE_PENALTY = 100.0
 
