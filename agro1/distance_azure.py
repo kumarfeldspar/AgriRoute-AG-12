@@ -3,12 +3,22 @@
 """
 distance_azure.py
 -----------------
-Generates possible road distances among farms, storage hubs, and distribution centers.
+Generates actual route distances (and polylines) between farms/hubs/centers via Azure Maps if possible.
 
-- If AZURE_MAPS_KEY is set and use_azure=True, attempts real distances from Azure.
-- Otherwise uses Haversine or radial approximation.
+We store in dist_dict[(t1, id1, t2, id2)] = [
+   {
+       "route_id": 1,
+       "distance_km": X,
+       "geometry": [ [lon, lat], [lon, lat], ... ]  # from the polyline
+   },
+   {
+       "route_id": 2,
+       "distance_km": X2,
+       "geometry": ...
+   }
+]
 
-We store multiple possible roads per pair (2 max) for demonstration.
+If no Azure key or use_azure=False, fallback to Haversine for distance, and geometry is just [start, end].
 """
 
 import math
@@ -16,88 +26,120 @@ import requests
 import time
 import random
 
-# Optionally set your Azure Maps key here
-AZURE_MAPS_KEY = "4j0DlBhKmXzbG2frDTurBFfAq6NPysfILisACKoao83EcEjvmEobJQQJ99BAACYeBjFeh7q1AAAgAZMP3Pj2"  # e.g. "YOUR_REAL_AZURE_KEY"
+AZURE_MAPS_KEY = "4j0DlBhKmXzbG2frDTurBFfAq6NPysfILisACKoao83EcEjvmEobJQQJ99BAACYeBjFeh7q1AAAgAZMP3Pj2"  # Put your valid Azure Maps key here if desired
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Returns distance in kilometers using the Haversine formula.
-    """
-    R = 6371.0  # Earth radius in km
+    R = 6371.0
     dLat = math.radians(lat2 - lat1)
     dLon = math.radians(lon2 - lon1)
     a = (math.sin(dLat/2)**2 +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2)
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c
+         math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dLon/2)**2)
+    c = 2*math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R*c
+
+def decode_polyline(polyline_str):
+    """
+    Decodes an Azure polyline (simplified) from the route/directions API.
+    Each point is offset-encoded. We can use a standard Google polyline decode library,
+    or do a simpler decode if Azure returns geometry in an array. We'll assume standard polyline decode.
+    If it doesn't match, you may adapt as needed.
+
+    For demonstration, we handle standard polyline. 
+    If you want, you can parse the "legs/points" from the Azure JSON directly.
+    """
+    # If Azure returns legs/points, we'd just parse that. 
+    # Implementation here is left as a placeholder if Azure returns a "polyline" field.
+    # For now, we do a stub returning empty or a single line. We'll do a simpler approach:
+    return []  # stub
+
+def azure_route(origin, dest):
+    """
+    Calls Azure Maps to get primary route distance + geometry.
+    We do routeRepresentation=polyline, then parse the geometry from "coordinates" in the JSON response.
+    Returns (distance_km, geometryList[ [lon,lat], [lon,lat], ... ])
+    or (None, None) on failure.
+    """
+    if not AZURE_MAPS_KEY:
+        return None, None
+    # origin, dest => [lat, lon]
+    base_url = (
+        "https://atlas.microsoft.com/route/directions/json"
+        f"?api-version=1.0"
+        f"&subscription-key={AZURE_MAPS_KEY}"
+        f"&query={origin[0]},{origin[1]}:{dest[0]},{dest[1]}"
+        "&routeType=shortest"
+        "&travelMode=car"
+        "&routeRepresentation=polyline"
+    )
+    resp = requests.get(base_url)
+    if resp.status_code == 200:
+        data = resp.json()
+        try:
+            dist_m = data["routes"][0]["summary"]["lengthInMeters"]
+            dist_km = dist_m / 1000.0
+            # geometry from legs
+            # Usually data["routes"][0]["legs"][0]["points"] => array of {latitude,longitude}
+            # We'll parse them
+            points_data = []
+            route_legs = data["routes"][0]["legs"]
+            for lg in route_legs:
+                for pt in lg["points"]:
+                    lat = pt["latitude"]
+                    lon = pt["longitude"]
+                    points_data.append([lon, lat])
+            return dist_km, points_data
+        except:
+            return None, None
+    return None, None
 
 def build_distance_matrix(farms, hubs, centers, use_azure=False):
     """
-    Returns a dict:
-        dist_dict[(type1, id1, type2, id2)] = [
-           { "route_id": 1, "distance_km": X1 },
-           { "route_id": 2, "distance_km": X2 },
-           ...
-        ]
-    We do farm->hub and hub->center pairs. (Farm->center can be added similarly if needed.)
+    Returns dist_dict with up to 2 routes: primary + alt (which we'll just do 1.1x distance).
+    For the real route, we either call Azure or do haversine.
     """
     dist_dict = {}
 
-    def azure_route_distance(origin, dest):
-        """
-        Returns route distance in km if successful, else None.
-        """
-        if not AZURE_MAPS_KEY:
-            return None
-        base_url = (
-            "https://atlas.microsoft.com/route/directions/json"
-            f"?subscription-key={AZURE_MAPS_KEY}"
-            "&api-version=1.0"
-            f"&query={origin[0]},{origin[1]}:{dest[0]},{dest[1]}"
-            "&routeType=shortest&travelMode=car"
-        )
-        resp = requests.get(base_url)
-        if resp.status_code == 200:
-            data = resp.json()
-            try:
-                dist_meters = data["routes"][0]["summary"]["lengthInMeters"]
-                return dist_meters / 1000.0  # convert to km
-            except:
-                return None
-        return None
-
-    def compute_all_roads(origin, dest):
-        """
-        Returns up to 2 roads (primary + secondary).
-        """
+    def get_two_routes(origin, dest):
+        # primary
         if use_azure:
-            d1 = azure_route_distance(origin, dest)
-            time.sleep(0.05)
+            d1, geom1 = azure_route(origin, dest)
+            time.sleep(0.1)  # avoid rate-limits
             if d1 is None:
                 # fallback
                 d1 = haversine_distance(origin[0], origin[1], dest[0], dest[1])
+                geom1 = [[origin[1], origin[0]], [dest[1], dest[0]]]  # just line
         else:
             d1 = haversine_distance(origin[0], origin[1], dest[0], dest[1])
+            geom1 = [[origin[1], origin[0]], [dest[1], dest[0]]]  # line start->end
 
-        if d1 is None:
-            return []
-        d2 = round(d1 * 1.1, 3)
+        d2 = d1 * 1.1  # alt route
+        # We'll do a naive alt geometry shifting midpoints or something
+        # but let's keep it simple: same geometry plus a slight offset
+        geom2 = geom1[:]  # same route, or we could nudge
+
         roads = [
-            {"route_id": 1, "distance_km": round(d1, 3)},
-            {"route_id": 2, "distance_km": d2}
+            {
+                "route_id": 1,
+                "distance_km": round(d1, 3),
+                "geometry": geom1
+            },
+            {
+                "route_id": 2,
+                "distance_km": round(d2, 3),
+                "geometry": geom2
+            }
         ]
         return roads
 
-    # Farm->Hub
+    # farm->hub
     for f in farms:
         for h in hubs:
-            roads = compute_all_roads(f["location"], h["location"])
+            roads = get_two_routes(f["location"], h["location"])
             dist_dict[("farm", f["id"], "hub", h["id"])] = roads
-
-    # Hub->Center
+    # hub->center
     for h in hubs:
         for c in centers:
-            roads = compute_all_roads(h["location"], c["location"])
+            roads = get_two_routes(h["location"], c["location"])
             dist_dict[("hub", h["id"], "center", c["id"])] = roads
 
     return dist_dict

@@ -24,9 +24,12 @@ from greedy_kmeans import run_greedy_kmeans
 from linear_programming import run_linear_program
 from ga_mutation import run_genetic_algorithm
 
+# -----------------------------------------------------------
+# Utility functions for map display
+# -----------------------------------------------------------
 def display_node_map(farms, hubs, centers):
     """
-    Displays a map with Farms, Hubs, Centers in different colors.
+    Displays a map with Farms, Hubs, and Centers in different colors.
     """
     if not farms and not hubs and not centers:
         st.info("No data to display on map.")
@@ -39,14 +42,14 @@ def display_node_map(farms, hubs, centers):
             "id": [f["id"] for f in farms],
             "lat": [f["location"][0] for f in farms],
             "lon": [f["location"][1] for f in farms],
-            "type": ["Farm"]*len(farms)
+            "type": ["Farm"] * len(farms)
         })
         layer_farms = pdk.Layer(
             "ScatterplotLayer",
             data=df_f,
-            get_position=["lon","lat"],
+            get_position=["lon", "lat"],
             get_radius=2500,
-            get_fill_color=[255,0,0],
+            get_fill_color=[255, 0, 0],
             pickable=True
         )
         layers.append(layer_farms)
@@ -57,14 +60,14 @@ def display_node_map(farms, hubs, centers):
             "id": [h["id"] for h in hubs],
             "lat": [h["location"][0] for h in hubs],
             "lon": [h["location"][1] for h in hubs],
-            "type": ["Hub"]*len(hubs)
+            "type": ["Hub"] * len(hubs)
         })
         layer_hubs = pdk.Layer(
             "ScatterplotLayer",
             data=df_h,
-            get_position=["lon","lat"],
+            get_position=["lon", "lat"],
             get_radius=3000,
-            get_fill_color=[0,0,255],
+            get_fill_color=[0, 0, 255],
             pickable=True
         )
         layers.append(layer_hubs)
@@ -75,19 +78,19 @@ def display_node_map(farms, hubs, centers):
             "id": [c["id"] for c in centers],
             "lat": [c["location"][0] for c in centers],
             "lon": [c["location"][1] for c in centers],
-            "type": ["Center"]*len(centers)
+            "type": ["Center"] * len(centers)
         })
         layer_centers = pdk.Layer(
             "ScatterplotLayer",
             data=df_c,
-            get_position=["lon","lat"],
+            get_position=["lon", "lat"],
             get_radius=3500,
-            get_fill_color=[0,255,0],
+            get_fill_color=[0, 255, 0],
             pickable=True
         )
         layers.append(layer_centers)
 
-    # center map
+    # Determine center of map
     lat0, lon0 = 28.7041, 77.1025
     if farms:
         lat0, lon0 = farms[0]["location"]
@@ -97,12 +100,15 @@ def display_node_map(farms, hubs, centers):
         lat0, lon0 = centers[0]["location"]
 
     view_state = pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30)
-    deck = pdk.Deck(layers=layers, initial_view_state=view_state, map_style="mapbox://styles/mapbox/light-v9")
+    deck = pdk.Deck(layers=layers, initial_view_state=view_state,
+                    map_style="mapbox://styles/mapbox/light-v9")
     st.pydeck_chart(deck)
 
 def display_distance_map(dist_dict, farms, hubs, centers):
     """
-    Show lines for each pair for route_id=1, labeled with distance.
+    Displays the route paths on the map.  
+    If a road entry in dist_dict does not include a 'geometry' field, a simulated
+    road is generated as [ [lon1, lat1], [lon2, lat2] ].
     """
     lines = []
     texts = []
@@ -122,28 +128,35 @@ def display_distance_map(dist_dict, farms, hubs, centers):
     for (t1, id1, t2, id2), roads in dist_dict.items():
         if not roads:
             continue
-        dist_km = None
-        for rd in roads:
-            if rd["route_id"] == 1:
-                dist_km = rd["distance_km"]
-                break
-        if dist_km is None:
+        # Choose route_id==1
+        primary = next((r for r in roads if r.get("route_id") == 1), None)
+        if primary is None:
             continue
 
-        loc1 = get_location(t1, id1)
-        loc2 = get_location(t2, id2)
-        if loc1 and loc2:
-            lines.append({
-                "path": [[loc1[1], loc1[0]], [loc2[1], loc2[0]]],
-                "color": [128,128,128],
-                "distance": dist_km
-            })
-            mid_lon = (loc1[1] + loc2[1])/2
-            mid_lat = (loc1[0] + loc2[0])/2
-            texts.append({
-                "coordinates": [mid_lon, mid_lat],
-                "text": f"{dist_km:.1f} km"
-            })
+        dist_km = primary.get("distance_km")
+        # Use 'geometry' if it exists; otherwise generate a simple 2-point path
+        geom = primary.get("geometry")
+        if not geom:
+            loc1 = get_location(t1, id1)
+            loc2 = get_location(t2, id2)
+            if loc1 and loc2:
+                # Format: [ [lon, lat], [lon, lat] ]
+                geom = [[loc1[1], loc1[0]], [loc2[1], loc2[0]]]
+            else:
+                continue
+
+        # Use the first coordinate for the text position
+        mid_lon = (geom[0][0] + geom[-1][0]) / 2
+        mid_lat = (geom[0][1] + geom[-1][1]) / 2
+        lines.append({
+            "path": geom,
+            "color": [128, 128, 128],
+            "distance": dist_km
+        })
+        texts.append({
+            "coordinates": [mid_lon, mid_lat],
+            "text": f"{dist_km:.1f} km"
+        })
 
     if not lines:
         st.info("No roads found to display.")
@@ -164,13 +177,13 @@ def display_distance_map(dist_dict, farms, hubs, centers):
         get_position="coordinates",
         get_text="text",
         get_size=16,
-        get_color=[0,0,0],
+        get_color=[0, 0, 0],
         sizeUnits='meters',
         sizeScale=20,
         sizeMinPixels=12
     )
 
-    # center
+    # Center the view
     lat0, lon0 = 28.7041, 77.1025
     if farms:
         lat0, lon0 = farms[0]["location"]
@@ -184,75 +197,170 @@ def display_distance_map(dist_dict, farms, hubs, centers):
                     map_style="mapbox://styles/mapbox/light-v9")
     st.pydeck_chart(deck)
 
+# -----------------------------------------------------------
+# Main Dashboard
+# -----------------------------------------------------------
 def main():
     st.title("Agro-Route: Optimized Agricultural Supply Chain System")
-
     st.sidebar.title("1) Data Input Options")
-
     input_mode = st.sidebar.radio("Choose Input Mode:", ["Manual", "Simulate"])
 
-    if "farms" not in st.session_state:
-        st.session_state["farms"] = []
-    if "hubs" not in st.session_state:
-        st.session_state["hubs"] = []
-    if "centers" not in st.session_state:
-        st.session_state["centers"] = []
-    if "vehicles" not in st.session_state:
-        st.session_state["vehicles"] = []
-    if "dist_dict" not in st.session_state:
-        st.session_state["dist_dict"] = {}
+    # Initialize session state objects if they are not set
+    for key in ["farms", "hubs", "centers", "vehicles", "dist_dict"]:
+        if key not in st.session_state:
+            st.session_state[key] = [] if key != "dist_dict" else {}
 
-    # Manual Input
+    # ----------------------------
+    # MANUAL INPUT MODE: Enhanced using forms
+    # ----------------------------
     if input_mode == "Manual":
-        st.sidebar.subheader("Enter Numbers of Each Entity:")
-        num_farms = st.sidebar.number_input("Num Farms:", min_value=1, max_value=50, value=3)
-        num_hubs = st.sidebar.number_input("Num Hubs:", min_value=1, max_value=20, value=2)
-        num_centers = st.sidebar.number_input("Num Centers:", min_value=1, max_value=20, value=2)
-        num_vehicles = st.sidebar.number_input("Num Vehicles:", min_value=1, max_value=10, value=3)
+        st.sidebar.subheader("Enter Numbers of Entities")
+        num_farms = st.sidebar.number_input("Number of Farms", min_value=1, max_value=50, value=3)
+        num_hubs = st.sidebar.number_input("Number of Hubs", min_value=1, max_value=20, value=2)
+        num_centers = st.sidebar.number_input("Number of Centers", min_value=1, max_value=20, value=2)
+        num_vehicles = st.sidebar.number_input("Number of Vehicles", min_value=1, max_value=10, value=3)
 
         if st.sidebar.button("Create Manual Forms"):
-            # Create placeholders
-            st.session_state["farms"] = []
-            for i in range(num_farms):
-                st.session_state["farms"].append({
+            # Create default placeholders
+            st.session_state["farms"] = [
+                {
                     "id": i,
-                    "location": [28.7 + i*0.01, 77.1 + i*0.01],
+                    "location": [28.7 + i * 0.01, 77.1 + i * 0.01],
                     "produce_quantity": 500,
                     "perishability_window": 3
-                })
-
-            st.session_state["hubs"] = []
-            for i in range(num_hubs):
-                st.session_state["hubs"].append({
+                }
+                for i in range(num_farms)
+            ]
+            st.session_state["hubs"] = [
+                {
                     "id": i,
-                    "location": [28.6 + i*0.01, 77.0 + i*0.01],
+                    "location": [28.6 + i * 0.01, 77.0 + i * 0.01],
                     "capacity": 2000,
                     "storage_cost_per_unit": 1.0,
                     "fixed_usage_cost": 1000
-                })
-
-            st.session_state["centers"] = []
-            for i in range(num_centers):
-                st.session_state["centers"].append({
+                }
+                for i in range(num_hubs)
+            ]
+            st.session_state["centers"] = [
+                {
                     "id": i,
-                    "location": [28.9 + i*0.01, 77.2 + i*0.01],
+                    "location": [28.9 + i * 0.01, 77.2 + i * 0.01],
                     "demand": 800,
                     "deadline": 4
-                })
-
-            st.session_state["vehicles"] = []
-            for i in range(num_vehicles):
-                typ = "small" if i < 2 else "large"
-                st.session_state["vehicles"].append({
+                }
+                for i in range(num_centers)
+            ]
+            st.session_state["vehicles"] = [
+                {
                     "id": i,
-                    "type": typ,
-                    "capacity": 1000 if typ=="small" else 3000,
-                    "fixed_cost": 200 if typ=="small" else 350,
-                    "variable_cost_per_distance": 0.8 if typ=="small" else 1.0
-                })
+                    "type": "small" if i < 2 else "large",
+                    "capacity": 1000 if i < 2 else 3000,
+                    "fixed_cost": 200 if i < 2 else 350,
+                    "variable_cost_per_distance": 0.8 if i < 2 else 1.0
+                }
+                for i in range(num_vehicles)
+            ]
+            st.session_state["dist_dict"] = {}
+            st.success("Default manual forms created!")
 
-    # Simulate
-    if input_mode == "Simulate":
+        st.header("Manual Edit of Data")
+
+        # --- Farms Form ---
+        with st.form("farms_form"):
+            st.subheader("Farms")
+            new_farms = []
+            for i, f in enumerate(st.session_state["farms"]):
+                st.markdown(f"**Farm #{i}**")
+                fid = st.number_input(f"Farm ID", value=f["id"], key=f"farm_id_{i}")
+                lat = st.number_input(f"Latitude", value=float(f["location"][0]), key=f"farm_lat_{i}")
+                lon = st.number_input(f"Longitude", value=float(f["location"][1]), key=f"farm_lon_{i}")
+                qty = st.number_input(f"Produce Quantity", value=int(f["produce_quantity"]), key=f"farm_qty_{i}")
+                perish = st.number_input(f"Perishability Window", value=int(f["perishability_window"]), key=f"farm_pw_{i}")
+                new_farms.append({
+                    "id": fid,
+                    "location": [lat, lon],
+                    "produce_quantity": qty,
+                    "perishability_window": perish
+                })
+                st.markdown("---")
+            if st.form_submit_button("Save Farms"):
+                st.session_state["farms"] = new_farms
+                st.success("Farms updated!")
+
+        # --- Hubs Form ---
+        with st.form("hubs_form"):
+            st.subheader("Storage Hubs")
+            new_hubs = []
+            for i, h in enumerate(st.session_state["hubs"]):
+                st.markdown(f"**Hub #{i}**")
+                hid = st.number_input(f"Hub ID", value=h["id"], key=f"hub_id_{i}")
+                lat = st.number_input(f"Latitude", value=float(h["location"][0]), key=f"hub_lat_{i}")
+                lon = st.number_input(f"Longitude", value=float(h["location"][1]), key=f"hub_lon_{i}")
+                cap = st.number_input(f"Capacity", value=int(h["capacity"]), key=f"hub_cap_{i}")
+                scost = st.number_input(f"Storage Cost per Unit", value=float(h["storage_cost_per_unit"]), key=f"hub_scost_{i}")
+                fcost = st.number_input(f"Fixed Usage Cost", value=float(h["fixed_usage_cost"]), key=f"hub_fcost_{i}")
+                new_hubs.append({
+                    "id": hid,
+                    "location": [lat, lon],
+                    "capacity": cap,
+                    "storage_cost_per_unit": scost,
+                    "fixed_usage_cost": fcost
+                })
+                st.markdown("---")
+            if st.form_submit_button("Save Hubs"):
+                st.session_state["hubs"] = new_hubs
+                st.success("Hubs updated!")
+
+        # --- Centers Form ---
+        with st.form("centers_form"):
+            st.subheader("Distribution Centers")
+            new_centers = []
+            for i, c in enumerate(st.session_state["centers"]):
+                st.markdown(f"**Center #{i}**")
+                cid = st.number_input(f"Center ID", value=c["id"], key=f"cen_id_{i}")
+                lat = st.number_input(f"Latitude", value=float(c["location"][0]), key=f"cen_lat_{i}")
+                lon = st.number_input(f"Longitude", value=float(c["location"][1]), key=f"cen_lon_{i}")
+                dem = st.number_input(f"Demand", value=int(c["demand"]), key=f"cen_dem_{i}")
+                deadline = st.number_input(f"Deadline", value=int(c["deadline"]), key=f"cen_deadline_{i}")
+                new_centers.append({
+                    "id": cid,
+                    "location": [lat, lon],
+                    "demand": dem,
+                    "deadline": deadline
+                })
+                st.markdown("---")
+            if st.form_submit_button("Save Centers"):
+                st.session_state["centers"] = new_centers
+                st.success("Centers updated!")
+
+        # --- Vehicles Form ---
+        with st.form("vehicles_form"):
+            st.subheader("Vehicles")
+            new_vehicles = []
+            for i, v in enumerate(st.session_state["vehicles"]):
+                st.markdown(f"**Vehicle #{i}**")
+                vid = st.number_input(f"Vehicle ID", value=v["id"], key=f"veh_id_{i}")
+                vtype = st.selectbox(f"Type", options=["small", "large"], index=(0 if v["type"]=="small" else 1), key=f"veh_type_{i}")
+                cap = st.number_input(f"Capacity", value=int(v["capacity"]), key=f"veh_cap_{i}")
+                fcost = st.number_input(f"Fixed Cost", value=float(v["fixed_cost"]), key=f"veh_fcost_{i}")
+                varcost = st.number_input(f"Variable Cost Per Distance", value=float(v["variable_cost_per_distance"]), key=f"veh_varcost_{i}")
+                new_vehicles.append({
+                    "id": vid,
+                    "type": vtype,
+                    "capacity": cap,
+                    "fixed_cost": fcost,
+                    "variable_cost_per_distance": varcost
+                })
+                st.markdown("---")
+            if st.form_submit_button("Save Vehicles"):
+                st.session_state["vehicles"] = new_vehicles
+                st.success("Vehicles updated!")
+
+    # ----------------------------
+    # SIMULATE MODE
+    # ----------------------------
+    elif input_mode == "Simulate":
+        st.sidebar.subheader("Simulation Setup")
         num_farms_s = st.sidebar.slider("Num Farms", 1, 50, 5)
         num_hubs_s = st.sidebar.slider("Num Hubs", 1, 20, 3)
         num_centers_s = st.sidebar.slider("Num Centers", 1, 20, 2)
@@ -264,7 +372,12 @@ def main():
             st.session_state["hubs"] = simulate_storage_hubs(num_hubs_s, seed=100)
             st.session_state["centers"] = simulate_distribution_centers(num_centers_s, seed=200)
             st.session_state["vehicles"] = simulate_vehicles(small_veh, large_veh, seed=300)
+            st.session_state["dist_dict"] = {}
+            st.success("Simulated data created!")
 
+    # ----------------------------
+    # Display Current Data
+    # ----------------------------
     st.subheader("2) Current Data")
     col1, col2 = st.columns(2)
     with col1:
@@ -278,9 +391,15 @@ def main():
         st.write("**Vehicles**")
         st.dataframe(pd.DataFrame(st.session_state["vehicles"]))
 
-    st.subheader("3) Map of Farms, Hubs, Centers")
+    # ----------------------------
+    # Map of Nodes
+    # ----------------------------
+    st.subheader("3) Map of Farms, Hubs, and Centers")
     display_node_map(st.session_state["farms"], st.session_state["hubs"], st.session_state["centers"])
 
+    # ----------------------------
+    # Build Distance Matrix
+    # ----------------------------
     st.subheader("4) Build Distance Matrix")
     use_azure = st.checkbox("Use Azure Maps?")
     if st.button("Generate Distances"):
@@ -296,7 +415,7 @@ def main():
     if st.session_state["dist_dict"]:
         st.write("Distance Matrix (sample):")
         sample_items = list(st.session_state["dist_dict"].items())[:10]
-        for k,v in sample_items:
+        for k, v in sample_items:
             st.write(f"{k}: {v}")
 
         st.subheader("Optional: Display Distance Map")
@@ -306,43 +425,53 @@ def main():
                                  st.session_state["hubs"],
                                  st.session_state["centers"])
 
+    # ----------------------------
+    # Run Optimization / Benchmarks
+    # ----------------------------
     st.subheader("5) Run Benchmarks / Optimization")
     colA, colB, colC = st.columns(3)
     with colA:
         if st.button("Greedy K-Means"):
-            sol = run_greedy_kmeans(st.session_state["farms"],
-                                    st.session_state["hubs"],
-                                    st.session_state["centers"],
-                                    st.session_state["vehicles"],
-                                    st.session_state["dist_dict"],
-                                    output_file="greedy_solution.json")
+            sol = run_greedy_kmeans(
+                st.session_state["farms"],
+                st.session_state["hubs"],
+                st.session_state["centers"],
+                st.session_state["vehicles"],
+                st.session_state["dist_dict"],
+                output_file="greedy_solution.json"
+            )
             st.session_state["greedy_solution"] = sol
             st.success("Greedy K-Means Completed!")
-
     with colB:
         if st.button("Linear Programming"):
-            sol = run_linear_program(st.session_state["farms"],
-                                     st.session_state["hubs"],
-                                     st.session_state["centers"],
-                                     st.session_state["vehicles"],
-                                     st.session_state["dist_dict"],
-                                     output_file="lp_solution.json")
+            sol = run_linear_program(
+                st.session_state["farms"],
+                st.session_state["hubs"],
+                st.session_state["centers"],
+                st.session_state["vehicles"],
+                st.session_state["dist_dict"],
+                output_file="lp_solution.json"
+            )
             st.session_state["lp_solution"] = sol
             st.success("LP Completed!")
-
     with colC:
         if st.button("Genetic Algorithm"):
-            sol = run_genetic_algorithm(st.session_state["farms"],
-                                        st.session_state["hubs"],
-                                        st.session_state["centers"],
-                                        st.session_state["vehicles"],
-                                        st.session_state["dist_dict"],
-                                        pop_size=50,
-                                        max_generations=50,
-                                        output_file="ga_solution.json")
+            sol = run_genetic_algorithm(
+                st.session_state["farms"],
+                st.session_state["hubs"],
+                st.session_state["centers"],
+                st.session_state["vehicles"],
+                st.session_state["dist_dict"],
+                pop_size=50,
+                max_generations=50,
+                output_file="ga_solution.json"
+            )
             st.session_state["ga_solution"] = sol
             st.success("Genetic Algorithm Completed!")
 
+    # ----------------------------
+    # Results & Visualization
+    # ----------------------------
     st.subheader("6) Results & Visualization")
 
     def show_greedy_result(gsol):
@@ -351,10 +480,9 @@ def main():
             return
         st.write("**Greedy Solution JSON**:")
         st.json(gsol)
-
-        # Simple route map for stage1 farm->hub lines
+        # Simple route map: draw farm->hub lines
         lines = []
-        for cl in gsol["clusters"]:
+        for cl in gsol.get("clusters", []):
             hub_id = cl.get("hub_id")
             if hub_id is None:
                 continue
@@ -362,7 +490,7 @@ def main():
             if not hub_obj:
                 continue
             hub_loc = hub_obj["location"]
-            for cfarm in cl["cluster_farms"]:
+            for cfarm in cl.get("cluster_farms", []):
                 fid = cfarm["farm_id"]
                 farm_obj = next((f for f in st.session_state["farms"] if f["id"] == fid), None)
                 if farm_obj:
@@ -397,8 +525,7 @@ def main():
             return
         st.write("**LP Solution JSON**:")
         st.json(lpsol)
-
-        # route map
+        # Draw LP routes: plot farm->hub then hub->center
         lines = []
         for route in lpsol.get("detailed_routes", []):
             fid = route["farm_id"]
@@ -424,21 +551,24 @@ def main():
                     "color": [0, 255, 0]
                 })
         if lines:
-            layer = pdk.Layer("PathLayer", data=lines, get_path="path", get_color="color", width_min_pixels=3)
-            lat0, lon0 = (28.7, 77.1)
+            layer = pdk.Layer(
+                "PathLayer",
+                data=lines,
+                get_path="path",
+                get_color="color",
+                width_min_pixels=3
+            )
+            lat0, lon0 = 28.7, 77.1
             if st.session_state["farms"]:
                 lat0, lon0 = st.session_state["farms"][0]["location"]
-            deck = pdk.Deck(layers=[layer],
-                            initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
-                            map_style="mapbox://styles/mapbox/light-v9")
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
+                map_style="mapbox://styles/mapbox/light-v9"
+            )
             st.pydeck_chart(deck)
-
-        # Show table
-        droutes = lpsol.get("detailed_routes", [])
-        if droutes:
-            st.write("**LP Route Assignments**:")
-            df_dr = pd.DataFrame(droutes)
-            st.dataframe(df_dr)
+            st.write("**LP Route Assignments:**")
+            st.dataframe(pd.DataFrame(lpsol.get("detailed_routes", [])))
 
     def show_ga_result(ga_sol):
         if not ga_sol:
@@ -446,8 +576,7 @@ def main():
             return
         st.write("**GA Solution JSON**:")
         st.json(ga_sol)
-
-        # We'll show each 1-unit route
+        # Draw GA routes: plot both farm->hub and hub->center for each unit shipment
         lines = []
         for route in ga_sol.get("detailed_routes", []):
             fid = route["farm_id"]
@@ -456,8 +585,7 @@ def main():
             farm_obj = next((f for f in st.session_state["farms"] if f["id"] == fid), None)
             hub_obj = next((h for h in st.session_state["hubs"] if h["id"] == hid), None)
             cent_obj = next((c for c in st.session_state["centers"] if c["id"] == cid), None)
-
-            if farm_obj and hub_obj and route["dist_farm_hub"] is not None:
+            if farm_obj and hub_obj and route.get("dist_farm_hub") is not None:
                 lines.append({
                     "path": [
                         [farm_obj["location"][1], farm_obj["location"][0]],
@@ -465,43 +593,47 @@ def main():
                     ],
                     "color": [255, 0, 255]
                 })
-            if hub_obj and cent_obj and route["dist_hub_center"] is not None:
+            if hub_obj and cent_obj and route.get("dist_hub_center") is not None:
                 lines.append({
                     "path": [
                         [hub_obj["location"][1], hub_obj["location"][0]],
                         [cent_obj["location"][1], cent_obj["location"][0]]
                     ],
-                    "color": [255, 165, 0] # orange
+                    "color": [255, 165, 0]
                 })
         if lines:
-            layer = pdk.Layer("PathLayer", data=lines, get_path="path", get_color="color", width_min_pixels=3)
-            lat0, lon0 = (28.7, 77.1)
+            layer = pdk.Layer(
+                "PathLayer",
+                data=lines,
+                get_path="path",
+                get_color="color",
+                width_min_pixels=3
+            )
+            lat0, lon0 = 28.7, 77.1
             if st.session_state["farms"]:
                 lat0, lon0 = st.session_state["farms"][0]["location"]
-            deck = pdk.Deck(layers=[layer],
-                            initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
-                            map_style="mapbox://styles/mapbox/light-v9")
+            deck = pdk.Deck(
+                layers=[layer],
+                initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
+                map_style="mapbox://styles/mapbox/light-v9"
+            )
             st.pydeck_chart(deck)
+            st.write("**GA Detailed Routes:**")
+            st.dataframe(pd.DataFrame(ga_sol.get("detailed_routes", [])))
 
-        dr = ga_sol.get("detailed_routes", [])
-        if dr:
-            st.write("**GA Detailed Routes**:")
-            df_dr = pd.DataFrame(dr)
-            st.dataframe(df_dr)
-
-    tab1, tab2, tab3 = st.tabs(["Greedy", "LP", "GA"])
-    with tab1:
+    tabs = st.tabs(["Greedy", "LP", "GA"])
+    with tabs[0]:
         show_greedy_result(st.session_state.get("greedy_solution"))
-    with tab2:
+    with tabs[1]:
         show_lp_result(st.session_state.get("lp_solution"))
-    with tab3:
+    with tabs[2]:
         show_ga_result(st.session_state.get("ga_solution"))
 
-    # Optional timeline
+    # ----------------------------
+    # Optional Timeline (Concept)
+    # ----------------------------
     st.subheader("7) Timeline (Concept)")
-
     timeline_data = []
-    # If we have an LP solution with details:
     lp_sol = st.session_state.get("lp_solution")
     if lp_sol and "detailed_routes" in lp_sol:
         for route in lp_sol["detailed_routes"]:
@@ -524,7 +656,7 @@ def main():
         for cl in st.session_state["greedy_solution"].get("clusters", []):
             hid = cl.get("hub_id")
             if hid is not None:
-                for cf in cl["cluster_farms"]:
+                for cf in cl.get("cluster_farms", []):
                     timeline_data.append({
                         "entity": f"Farm{cf['farm_id']}->Hub{hid}",
                         "start": 0,
@@ -538,7 +670,6 @@ def main():
                     "stage": "Hub->Center"
                 })
     elif st.session_state.get("ga_solution"):
-        # We'll just do farm->hub->center in 2 steps for each 1-unit
         for route in st.session_state["ga_solution"].get("detailed_routes", []):
             fid = route["farm_id"]
             hid = route["hub_id"]
