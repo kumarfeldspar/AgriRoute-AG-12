@@ -22,7 +22,7 @@ from data_input import (
 from distance_azure import build_distance_matrix
 from greedy_kmeans import run_greedy_kmeans
 from linear_programming import run_linear_program
-from ga_mutation import run_genetic_algorithm
+from agro1.ga_mutation1 import run_genetic_algorithm
 
 def main():
     # 1) Simulate
