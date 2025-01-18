@@ -1,0 +1,14 @@
+[
+    {
+        "method":"Greedy-KMeans",
+        "total_cost":6633.99,
+        "total_spoilage":0.0,
+        "delivered_on_time":1381.5
+    },
+    {
+        "method":"LinearProgramming(docplex)",
+        "total_cost":5526.0,
+        "total_spoilage":2763.0,
+        "delivered_on_time":0.0
+    }
+]

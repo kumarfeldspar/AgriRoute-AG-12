@@ -1,0 +1,73 @@
+{
+    "method": "Greedy-KMeans",
+    "clusters": [
+        {
+            "centroid": [
+                28.778607122951684,
+                77.08176035482433
+            ],
+            "hub_id": 2,
+            "vehicle_id": 0,
+            "cluster_farms": [
+                {
+                    "farm_id": 0,
+                    "assigned_hub": 2,
+                    "quantity": 854,
+                    "spoilage": 0
+                }
+            ],
+            "cluster_spoilage": 427.0
+        },
+        {
+            "centroid": [
+                28.87111760152061,
+                77.27428484391707
+            ],
+            "hub_id": 2,
+            "vehicle_id": 0,
+            "cluster_farms": [
+                {
+                    "farm_id": 1,
+                    "assigned_hub": 2,
+                    "quantity": 225,
+                    "spoilage": 0
+                },
+                {
+                    "farm_id": 3,
+                    "assigned_hub": 2,
+                    "quantity": 342,
+                    "spoilage": 0
+                }
+            ],
+            "cluster_spoilage": 283.5
+        },
+        {
+            "centroid": [
+                28.651327917950628,
+                77.12563173149776
+            ],
+            "hub_id": 2,
+            "vehicle_id": 2,
+            "cluster_farms": [
+                {
+                    "farm_id": 2,
+                    "assigned_hub": 2,
+                    "quantity": 450,
+                    "spoilage": 0
+                },
+                {
+                    "farm_id": 4,
+                    "assigned_hub": 2,
+                    "quantity": 892,
+                    "spoilage": 0
+                }
+            ],
+            "cluster_spoilage": 671.0
+        }
+    ],
+    "stage1_routes": [],
+    "stage2_routes": [],
+    "total_cost": 7256.58,
+    "total_spoilage": 0.0,
+    "total_delivered_on_time": 1381.5
+}
