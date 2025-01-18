@@ -2,12 +2,13 @@
 """
 run_comparison.py
 -----------------
-Demonstration script to test both solutions in CLI:
+Demonstration script to test all three solutions in CLI:
  1) Generate or load data
  2) Build distance matrix
  3) Run Greedy K-Means
  4) Run LP
- 5) Compare results => comparison.json
+ 5) Run GA
+ 6) Compare => comparison.json
 """
 
 import json
@@ -21,6 +22,7 @@ from data_input import (
 from distance_azure import build_distance_matrix
 from greedy_kmeans import run_greedy_kmeans
 from linear_programming import run_linear_program
+from ga_mutation import run_genetic_algorithm
 
 def main():
     # 1) Simulate
@@ -38,7 +40,12 @@ def main():
     # 4) LP
     lp_sol = run_linear_program(farms, hubs, centers, vehicles, dist_dict, "lp_solution.json")
 
-    # 5) Compare
+    # 5) GA
+    ga_sol = run_genetic_algorithm(farms, hubs, centers, vehicles, dist_dict,
+                                   pop_size=50, max_generations=50,
+                                   output_file="ga_solution.json")
+
+    # 6) Compare
     data = []
     if greedy_sol:
         data.append({
@@ -53,6 +60,13 @@ def main():
             "total_cost": round(lp_sol["objective_value"], 2) if lp_sol["objective_value"] else 0,
             "total_spoilage": lp_sol.get("total_spoilage", 0),
             "delivered_on_time": lp_sol.get("delivered_on_time", 0)
+        })
+    if ga_sol:
+        data.append({
+            "method": ga_sol["method"],
+            "total_cost": ga_sol.get("best_cost", 0),
+            "total_spoilage": ga_sol.get("total_spoilage", 0),
+            "delivered_on_time": ga_sol.get("delivered_on_time", 0)
         })
 
     df = pd.DataFrame(data)

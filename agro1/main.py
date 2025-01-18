@@ -22,18 +22,18 @@ from data_input import (
 from distance_azure import build_distance_matrix
 from greedy_kmeans import run_greedy_kmeans
 from linear_programming import run_linear_program
+from ga_mutation import run_genetic_algorithm
 
-# ================ HELPER ================
 def display_node_map(farms, hubs, centers):
     """
-    Displays a map with Farms, Hubs, Centers in different colors, each as a scatter plot.
+    Displays a map with Farms, Hubs, Centers in different colors.
     """
     if not farms and not hubs and not centers:
         st.info("No data to display on map.")
         return
 
     layers = []
-    # Farms => color red
+    # Farms => red
     if farms:
         df_f = pd.DataFrame({
             "id": [f["id"] for f in farms],
@@ -51,7 +51,7 @@ def display_node_map(farms, hubs, centers):
         )
         layers.append(layer_farms)
 
-    # Hubs => color blue
+    # Hubs => blue
     if hubs:
         df_h = pd.DataFrame({
             "id": [h["id"] for h in hubs],
@@ -69,7 +69,7 @@ def display_node_map(farms, hubs, centers):
         )
         layers.append(layer_hubs)
 
-    # Centers => color green
+    # Centers => green
     if centers:
         df_c = pd.DataFrame({
             "id": [c["id"] for c in centers],
@@ -87,7 +87,7 @@ def display_node_map(farms, hubs, centers):
         )
         layers.append(layer_centers)
 
-    # center the map
+    # center map
     lat0, lon0 = 28.7041, 77.1025
     if farms:
         lat0, lon0 = farms[0]["location"]
@@ -102,16 +102,26 @@ def display_node_map(farms, hubs, centers):
 
 def display_distance_map(dist_dict, farms, hubs, centers):
     """
-    Show lines for each pair (farm->hub, hub->center) for the 'primary' route
-    and label them with route distance.
+    Show lines for each pair for route_id=1, labeled with distance.
     """
     lines = []
     texts = []
-    # For each key in dist_dict: (type1, id1, type2, id2) => roads
+
+    def get_location(node_type, node_id):
+        if node_type == "farm":
+            obj = next((f for f in farms if f["id"] == node_id), None)
+            return obj["location"] if obj else None
+        elif node_type == "hub":
+            obj = next((h for h in hubs if h["id"] == node_id), None)
+            return obj["location"] if obj else None
+        elif node_type == "center":
+            obj = next((c for c in centers if c["id"] == node_id), None)
+            return obj["location"] if obj else None
+        return None
+
     for (t1, id1, t2, id2), roads in dist_dict.items():
         if not roads:
             continue
-        # We'll pick route_id=1 as primary
         dist_km = None
         for rd in roads:
             if rd["route_id"] == 1:
@@ -120,42 +130,19 @@ def display_distance_map(dist_dict, farms, hubs, centers):
         if dist_km is None:
             continue
 
-        # get lat/lon for each node
-        p1 = None
-        p2 = None
-        if t1 == "farm":
-            fobj = next((f for f in farms if f["id"] == id1), None)
-            if fobj: p1 = fobj["location"]
-        elif t1 == "hub":
-            hobj = next((h for h in hubs if h["id"] == id1), None)
-            if hobj: p1 = hobj["location"]
-        elif t1 == "center":
-            cobj = next((c for c in centers if c["id"] == id1), None)
-            if cobj: p1 = cobj["location"]
-
-        if t2 == "farm":
-            fobj = next((f for f in farms if f["id"] == id2), None)
-            if fobj: p2 = fobj["location"]
-        elif t2 == "hub":
-            hobj = next((h for h in hubs if h["id"] == id2), None)
-            if hobj: p2 = hobj["location"]
-        elif t2 == "center":
-            cobj = next((c for c in centers if c["id"] == id2), None)
-            if cobj: p2 = cobj["location"]
-
-        if p1 and p2:
-            # Path
+        loc1 = get_location(t1, id1)
+        loc2 = get_location(t2, id2)
+        if loc1 and loc2:
             lines.append({
-                "path": [[p1[1], p1[0]], [p2[1], p2[0]]],
-                "color": [127, 127, 127],  # grey line
+                "path": [[loc1[1], loc1[0]], [loc2[1], loc2[0]]],
+                "color": [128,128,128],
                 "distance": dist_km
             })
-            # midpoint for text
-            mid_lon = (p1[1] + p2[1])/2
-            mid_lat = (p1[0] + p2[0])/2
+            mid_lon = (loc1[1] + loc2[1])/2
+            mid_lat = (loc1[0] + loc2[0])/2
             texts.append({
                 "coordinates": [mid_lon, mid_lat],
-                "text": f"{dist_km:.1f} km",
+                "text": f"{dist_km:.1f} km"
             })
 
     if not lines:
@@ -170,7 +157,6 @@ def display_distance_map(dist_dict, farms, hubs, centers):
         width_min_pixels=2,
         pickable=True
     )
-
     text_layer = pdk.Layer(
         "TextLayer",
         data=texts,
@@ -178,14 +164,14 @@ def display_distance_map(dist_dict, farms, hubs, centers):
         get_position="coordinates",
         get_text="text",
         get_size=16,
-        get_color=[0, 0, 0],
-        get_angle=0,
+        get_color=[0,0,0],
         sizeUnits='meters',
         sizeScale=20,
         sizeMinPixels=12
     )
 
-    lat0, lon0 = (28.7041, 77.1025)
+    # center
+    lat0, lon0 = 28.7041, 77.1025
     if farms:
         lat0, lon0 = farms[0]["location"]
     elif hubs:
@@ -194,11 +180,8 @@ def display_distance_map(dist_dict, farms, hubs, centers):
         lat0, lon0 = centers[0]["location"]
 
     view_state = pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30)
-    deck = pdk.Deck(
-        layers=[line_layer, text_layer],
-        initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/light-v9"
-    )
+    deck = pdk.Deck(layers=[line_layer, text_layer], initial_view_state=view_state,
+                    map_style="mapbox://styles/mapbox/light-v9")
     st.pydeck_chart(deck)
 
 def main():
@@ -219,7 +202,7 @@ def main():
     if "dist_dict" not in st.session_state:
         st.session_state["dist_dict"] = {}
 
-    # Manual Input Form
+    # Manual Input
     if input_mode == "Manual":
         st.sidebar.subheader("Enter Numbers of Each Entity:")
         num_farms = st.sidebar.number_input("Num Farms:", min_value=1, max_value=50, value=3)
@@ -228,7 +211,7 @@ def main():
         num_vehicles = st.sidebar.number_input("Num Vehicles:", min_value=1, max_value=10, value=3)
 
         if st.sidebar.button("Create Manual Forms"):
-            # We create placeholders so user can fill in details
+            # Create placeholders
             st.session_state["farms"] = []
             for i in range(num_farms):
                 st.session_state["farms"].append({
@@ -268,7 +251,7 @@ def main():
                     "variable_cost_per_distance": 0.8 if typ=="small" else 1.0
                 })
 
-    # Simulate Input
+    # Simulate
     if input_mode == "Simulate":
         num_farms_s = st.sidebar.slider("Num Farms", 1, 50, 5)
         num_hubs_s = st.sidebar.slider("Num Hubs", 1, 20, 3)
@@ -277,7 +260,6 @@ def main():
         large_veh = st.sidebar.slider("Large Vehicles", 0, 5, 1)
 
         if st.sidebar.button("Simulate Data"):
-            from data_input import simulate_farms, simulate_storage_hubs, simulate_distribution_centers, simulate_vehicles
             st.session_state["farms"] = simulate_farms(num_farms_s, seed=42)
             st.session_state["hubs"] = simulate_storage_hubs(num_hubs_s, seed=100)
             st.session_state["centers"] = simulate_distribution_centers(num_centers_s, seed=200)
@@ -302,7 +284,6 @@ def main():
     st.subheader("4) Build Distance Matrix")
     use_azure = st.checkbox("Use Azure Maps?")
     if st.button("Generate Distances"):
-        from distance_azure import build_distance_matrix
         dist_d = build_distance_matrix(
             st.session_state["farms"],
             st.session_state["hubs"],
@@ -313,7 +294,7 @@ def main():
         st.success("Distance matrix generated.")
 
     if st.session_state["dist_dict"]:
-        st.write("Distance Matrix (first few):")
+        st.write("Distance Matrix (sample):")
         sample_items = list(st.session_state["dist_dict"].items())[:10]
         for k,v in sample_items:
             st.write(f"{k}: {v}")
@@ -326,10 +307,9 @@ def main():
                                  st.session_state["centers"])
 
     st.subheader("5) Run Benchmarks / Optimization")
-    colA, colB = st.columns(2)
+    colA, colB, colC = st.columns(3)
     with colA:
         if st.button("Greedy K-Means"):
-            from greedy_kmeans import run_greedy_kmeans
             sol = run_greedy_kmeans(st.session_state["farms"],
                                     st.session_state["hubs"],
                                     st.session_state["centers"],
@@ -341,7 +321,6 @@ def main():
 
     with colB:
         if st.button("Linear Programming"):
-            from linear_programming import run_linear_program
             sol = run_linear_program(st.session_state["farms"],
                                      st.session_state["hubs"],
                                      st.session_state["centers"],
@@ -350,6 +329,19 @@ def main():
                                      output_file="lp_solution.json")
             st.session_state["lp_solution"] = sol
             st.success("LP Completed!")
+
+    with colC:
+        if st.button("Genetic Algorithm"):
+            sol = run_genetic_algorithm(st.session_state["farms"],
+                                        st.session_state["hubs"],
+                                        st.session_state["centers"],
+                                        st.session_state["vehicles"],
+                                        st.session_state["dist_dict"],
+                                        pop_size=50,
+                                        max_generations=50,
+                                        output_file="ga_solution.json")
+            st.session_state["ga_solution"] = sol
+            st.success("Genetic Algorithm Completed!")
 
     st.subheader("6) Results & Visualization")
 
@@ -360,7 +352,7 @@ def main():
         st.write("**Greedy Solution JSON**:")
         st.json(gsol)
 
-        # A simple route map: we only have cluster-level info
+        # Simple route map for stage1 farm->hub lines
         lines = []
         for cl in gsol["clusters"]:
             hub_id = cl.get("hub_id")
@@ -381,7 +373,6 @@ def main():
                         ],
                         "color": [255, 0, 0]
                     })
-
         if lines:
             layer = pdk.Layer(
                 "PathLayer",
@@ -390,14 +381,12 @@ def main():
                 get_color="color",
                 width_min_pixels=3
             )
-            lat0, lon0 = (28.7, 77.1)
+            lat0, lon0 = 28.7, 77.1
             if st.session_state["farms"]:
                 lat0, lon0 = st.session_state["farms"][0]["location"]
             deck = pdk.Deck(
                 layers=[layer],
-                initial_view_state=pdk.ViewState(
-                    latitude=lat0, longitude=lon0, zoom=6, pitch=30
-                ),
+                initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
                 map_style="mapbox://styles/mapbox/light-v9"
             )
             st.pydeck_chart(deck)
@@ -409,7 +398,7 @@ def main():
         st.write("**LP Solution JSON**:")
         st.json(lpsol)
 
-        # We'll show a route map for each detailed_routes
+        # route map
         lines = []
         for route in lpsol.get("detailed_routes", []):
             fid = route["farm_id"]
@@ -418,7 +407,6 @@ def main():
             farm_obj = next((f for f in st.session_state["farms"] if f["id"] == fid), None)
             hub_obj = next((h for h in st.session_state["hubs"] if h["id"] == hid), None)
             cent_obj = next((c for c in st.session_state["centers"] if c["id"] == cid), None)
-
             if farm_obj and hub_obj:
                 lines.append({
                     "path": [
@@ -435,79 +423,138 @@ def main():
                     ],
                     "color": [0, 255, 0]
                 })
-
         if lines:
-            layer = pdk.Layer(
-                "PathLayer",
-                data=lines,
-                get_path="path",
-                get_color="color",
-                width_min_pixels=3
-            )
+            layer = pdk.Layer("PathLayer", data=lines, get_path="path", get_color="color", width_min_pixels=3)
             lat0, lon0 = (28.7, 77.1)
             if st.session_state["farms"]:
                 lat0, lon0 = st.session_state["farms"][0]["location"]
-            deck = pdk.Deck(
-                layers=[layer],
-                initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
-                map_style="mapbox://styles/mapbox/light-v9"
-            )
+            deck = pdk.Deck(layers=[layer],
+                            initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
+                            map_style="mapbox://styles/mapbox/light-v9")
             st.pydeck_chart(deck)
 
-        # Show table of routes in a nicer format
+        # Show table
         droutes = lpsol.get("detailed_routes", [])
         if droutes:
-            st.write("**Route Assignments**:")
+            st.write("**LP Route Assignments**:")
             df_dr = pd.DataFrame(droutes)
             st.dataframe(df_dr)
 
-    tab1, tab2 = st.tabs(["Greedy", "LP"])
+    def show_ga_result(ga_sol):
+        if not ga_sol:
+            st.info("No GA solution found.")
+            return
+        st.write("**GA Solution JSON**:")
+        st.json(ga_sol)
+
+        # We'll show each 1-unit route
+        lines = []
+        for route in ga_sol.get("detailed_routes", []):
+            fid = route["farm_id"]
+            hid = route["hub_id"]
+            cid = route["center_id"]
+            farm_obj = next((f for f in st.session_state["farms"] if f["id"] == fid), None)
+            hub_obj = next((h for h in st.session_state["hubs"] if h["id"] == hid), None)
+            cent_obj = next((c for c in st.session_state["centers"] if c["id"] == cid), None)
+
+            if farm_obj and hub_obj and route["dist_farm_hub"] is not None:
+                lines.append({
+                    "path": [
+                        [farm_obj["location"][1], farm_obj["location"][0]],
+                        [hub_obj["location"][1], hub_obj["location"][0]]
+                    ],
+                    "color": [255, 0, 255]
+                })
+            if hub_obj and cent_obj and route["dist_hub_center"] is not None:
+                lines.append({
+                    "path": [
+                        [hub_obj["location"][1], hub_obj["location"][0]],
+                        [cent_obj["location"][1], cent_obj["location"][0]]
+                    ],
+                    "color": [255, 165, 0] # orange
+                })
+        if lines:
+            layer = pdk.Layer("PathLayer", data=lines, get_path="path", get_color="color", width_min_pixels=3)
+            lat0, lon0 = (28.7, 77.1)
+            if st.session_state["farms"]:
+                lat0, lon0 = st.session_state["farms"][0]["location"]
+            deck = pdk.Deck(layers=[layer],
+                            initial_view_state=pdk.ViewState(latitude=lat0, longitude=lon0, zoom=6, pitch=30),
+                            map_style="mapbox://styles/mapbox/light-v9")
+            st.pydeck_chart(deck)
+
+        dr = ga_sol.get("detailed_routes", [])
+        if dr:
+            st.write("**GA Detailed Routes**:")
+            df_dr = pd.DataFrame(dr)
+            st.dataframe(df_dr)
+
+    tab1, tab2, tab3 = st.tabs(["Greedy", "LP", "GA"])
     with tab1:
         show_greedy_result(st.session_state.get("greedy_solution"))
     with tab2:
         show_lp_result(st.session_state.get("lp_solution"))
+    with tab3:
+        show_ga_result(st.session_state.get("ga_solution"))
 
-    # Optionally, show a Gantt chart of movement
+    # Optional timeline
     st.subheader("7) Timeline (Concept)")
-    st.write("A simple demonstration: farm->hub from time=0 to 1, hub->center from 1 to 2.")
+
     timeline_data = []
     # If we have an LP solution with details:
     lp_sol = st.session_state.get("lp_solution")
     if lp_sol and "detailed_routes" in lp_sol:
         for route in lp_sol["detailed_routes"]:
-            farm_str = f"Farm{route['farm_id']}"
-            hub_str = f"Hub{route['hub_id']}"
-            center_str = f"Center{route['center_id']}"
+            fid = route["farm_id"]
+            hid = route["hub_id"]
+            cid = route["center_id"]
             timeline_data.append({
-                "entity": f"{farm_str}->{hub_str}",
+                "entity": f"Farm{fid}->Hub{hid}",
                 "start": 0,
                 "end": 1,
                 "stage": "Farm->Hub"
             })
             timeline_data.append({
-                "entity": f"{hub_str}->{center_str}",
+                "entity": f"Hub{hid}->Center{cid}",
                 "start": 1,
                 "end": 2,
                 "stage": "Hub->Center"
             })
     elif st.session_state.get("greedy_solution"):
-        # show cluster-based approach
-        for ccl in st.session_state["greedy_solution"].get("clusters", []):
-            hub_id = ccl.get("hub_id")
-            if hub_id is not None:
-                for cf in ccl["cluster_farms"]:
+        for cl in st.session_state["greedy_solution"].get("clusters", []):
+            hid = cl.get("hub_id")
+            if hid is not None:
+                for cf in cl["cluster_farms"]:
                     timeline_data.append({
-                        "entity": f"Farm{cf['farm_id']}->Hub{hub_id}",
+                        "entity": f"Farm{cf['farm_id']}->Hub{hid}",
                         "start": 0,
                         "end": 1,
                         "stage": "Farm->Hub"
                     })
                 timeline_data.append({
-                    "entity": f"Hub{hub_id}->Center(?)",
+                    "entity": f"Hub{hid}->Center(?)",
                     "start": 1,
                     "end": 2,
                     "stage": "Hub->Center"
                 })
+    elif st.session_state.get("ga_solution"):
+        # We'll just do farm->hub->center in 2 steps for each 1-unit
+        for route in st.session_state["ga_solution"].get("detailed_routes", []):
+            fid = route["farm_id"]
+            hid = route["hub_id"]
+            cid = route["center_id"]
+            timeline_data.append({
+                "entity": f"Farm{fid}->Hub{hid}",
+                "start": 0,
+                "end": 1,
+                "stage": "Farm->Hub"
+            })
+            timeline_data.append({
+                "entity": f"Hub{hid}->Center{cid}",
+                "start": 1,
+                "end": 2,
+                "stage": "Hub->Center"
+            })
 
     if timeline_data:
         df_tl = pd.DataFrame(timeline_data)
@@ -518,7 +565,6 @@ def main():
             color='stage:N'
         ).properties(width=700, height=300)
         st.altair_chart(chart, use_container_width=True)
-
 
 if __name__ == "__main__":
     main()

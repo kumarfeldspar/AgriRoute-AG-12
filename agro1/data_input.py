@@ -2,11 +2,13 @@
 """
 data_input.py
 -------------
-Handles data creation or manual entry for:
+Provides functions to SIMULATE data for:
  - Farms
  - Storage Hubs
  - Distribution Centers
  - Vehicles
+
+Manual input is handled interactively in `main.py` with Streamlit forms.
 """
 
 import random
@@ -14,8 +16,7 @@ import numpy as np
 
 def simulate_farms(num_farms=5, seed=42):
     """
-    Simulate random farm data.
-    Fields:
+    Simulate random farm data:
       - id
       - location (lat, lon)
       - produce_quantity
@@ -23,7 +24,7 @@ def simulate_farms(num_farms=5, seed=42):
     """
     random.seed(seed)
     np.random.seed(seed)
-    
+
     # Center around some region (e.g., near Delhi)
     center_lat, center_lon = 28.7041, 77.1025
     results = []
@@ -45,8 +46,7 @@ def simulate_farms(num_farms=5, seed=42):
 
 def simulate_storage_hubs(num_hubs=2, seed=100):
     """
-    Simulate random storage hubs.
-    Fields:
+    Simulate random storage hubs:
       - id
       - location (lat, lon)
       - capacity
@@ -55,6 +55,7 @@ def simulate_storage_hubs(num_hubs=2, seed=100):
     """
     random.seed(seed)
     np.random.seed(seed)
+
     center_lat, center_lon = 28.6, 77.0
     results = []
     for i in range(num_hubs):
@@ -75,8 +76,7 @@ def simulate_storage_hubs(num_hubs=2, seed=100):
 
 def simulate_distribution_centers(num_centers=2, seed=200):
     """
-    Simulate random distribution centers (DB Centers).
-    Fields:
+    Simulate random distribution centers:
       - id
       - location (lat, lon)
       - demand
@@ -84,6 +84,7 @@ def simulate_distribution_centers(num_centers=2, seed=200):
     """
     random.seed(seed)
     np.random.seed(seed)
+
     center_lat, center_lon = 28.8, 77.2
     results = []
     for i in range(num_centers):
@@ -102,8 +103,7 @@ def simulate_distribution_centers(num_centers=2, seed=200):
 
 def simulate_vehicles(num_small=2, num_large=1, seed=300):
     """
-    Simulate a list of vehicles.
-    Fields:
+    Simulate vehicles:
       - id
       - type ("small" or "large")
       - capacity
@@ -113,17 +113,17 @@ def simulate_vehicles(num_small=2, num_large=1, seed=300):
     random.seed(seed)
     results = []
     vid = 0
-    # Small vehicles
+    # Small
     for _ in range(num_small):
         results.append({
             "id": vid,
             "type": "small",
             "capacity": 1000,
-            "fixed_cost": 200,  # example
+            "fixed_cost": 200,
             "variable_cost_per_distance": 0.8
         })
         vid += 1
-    # Large vehicles
+    # Large
     for _ in range(num_large):
         results.append({
             "id": vid,
@@ -135,53 +135,3 @@ def simulate_vehicles(num_small=2, num_large=1, seed=300):
         vid += 1
 
     return results
-
-def manual_input_farms():
-    """
-    Stub for letting a user manually enter farm data.
-    Could be replaced by reading from CSV or a form input.
-    """
-    # Example: returning a single manual farm
-    # In a real system, you'd parse user input from a form or file.
-    return [{
-        "id": 0,
-        "location": [28.7, 77.1],
-        "produce_quantity": 500,
-        "perishability_window": 3
-    }]
-
-def manual_input_storage_hubs():
-    """
-    Stub for manual storage hub input.
-    """
-    return [{
-        "id": 0,
-        "location": [28.6, 77.0],
-        "capacity": 2000,
-        "storage_cost_per_unit": 1.0,
-        "fixed_usage_cost": 1000
-    }]
-
-def manual_input_distribution_centers():
-    """
-    Stub for manual DB centers.
-    """
-    return [{
-        "id": 0,
-        "location": [28.9, 77.2],
-        "demand": 800,
-        "deadline": 4
-    }]
-
-def manual_input_vehicles():
-    """
-    Stub for manual vehicles.
-    """
-    return [{
-        "id": 0,
-        "type": "small",
-        "capacity": 1000,
-        "fixed_cost": 200,
-        "variable_cost_per_distance": 0.8
-    }]
-

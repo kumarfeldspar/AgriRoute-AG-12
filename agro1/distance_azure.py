@@ -1,4 +1,5 @@
 
+#!/usr/bin/env python
 """
 distance_azure.py
 -----------------
@@ -7,8 +8,7 @@ Generates possible road distances among farms, storage hubs, and distribution ce
 - If AZURE_MAPS_KEY is set and use_azure=True, attempts real distances from Azure.
 - Otherwise uses Haversine or radial approximation.
 
-NEW: For demonstration, we store multiple "roads" for each pair if possible. We'll
-     just randomly generate a "secondary route" as an alternate path.
+We store multiple possible roads per pair (2 max) for demonstration.
 """
 
 import math
@@ -33,25 +33,19 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def build_distance_matrix(farms, hubs, centers, use_azure=False):
     """
-    Returns a dict like:
+    Returns a dict:
         dist_dict[(type1, id1, type2, id2)] = [
            { "route_id": 1, "distance_km": X1 },
-           { "route_id": 2, "distance_km": X2 },  # alternate route
+           { "route_id": 2, "distance_km": X2 },
            ...
         ]
-
-    Where we store multiple possible roads per pair (2 max in this example).
-    If Azure is used and we have a valid key, we get the "primary" route from Azure,
-    plus a fake "secondary" route 10% longer. Otherwise, we fallback to Haversine
-    plus a random alternate route.
-
-    We'll do farm->hub, hub->center, farm->center if you want. We'll show just farm->hub + hub->center for now.
+    We do farm->hub and hub->center pairs. (Farm->center can be added similarly if needed.)
     """
     dist_dict = {}
 
     def azure_route_distance(origin, dest):
         """
-        Returns the route distance in km if successful, otherwise None.
+        Returns route distance in km if successful, else None.
         """
         if not AZURE_MAPS_KEY:
             return None
@@ -74,9 +68,7 @@ def build_distance_matrix(farms, hubs, centers, use_azure=False):
 
     def compute_all_roads(origin, dest):
         """
-        Returns a list of roads/distance objects for that pair:
-           [ { "route_id": 1, "distance_km": val1 }, ... ]
-        We'll store up to 2 routes: primary + secondary.
+        Returns up to 2 roads (primary + secondary).
         """
         if use_azure:
             d1 = azure_route_distance(origin, dest)
@@ -89,11 +81,7 @@ def build_distance_matrix(farms, hubs, centers, use_azure=False):
 
         if d1 is None:
             return []
-
-        # We'll define a second route that is e.g. 1.1 * distance
         d2 = round(d1 * 1.1, 3)
-
-        # Return them
         roads = [
             {"route_id": 1, "distance_km": round(d1, 3)},
             {"route_id": 2, "distance_km": d2}
