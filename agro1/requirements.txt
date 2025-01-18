@@ -1,0 +1,6 @@
+pip install streamlit pydeck numpy pandas scikit-learn requests altair
+# If using docplex for LP:
+pip install docplex
+# If using pulp + cplex solver:
+pip install pulp
+# Then separately install or configure CPLEX if needed.
