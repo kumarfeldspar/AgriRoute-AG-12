@@ -2,7 +2,7 @@
 """
 main.py
 -------
-Streamlit Dashboard for Agro-Route.
+Integrated Streamlit Dashboard for Agro-Route, including analytics/visualization.
 
 Usage:
     streamlit run main.py
@@ -12,8 +12,9 @@ import streamlit as st
 import pandas as pd
 import pydeck as pdk
 import altair as alt
-import json
 import math
+import matplotlib.pyplot as plt
+import plotly.express as px
 
 from data_input import (
     simulate_farms, simulate_storage_hubs,
@@ -24,12 +25,13 @@ from greedy_kmeans import run_greedy_kmeans
 from linear_programming import run_linear_program
 from ga_mutation import run_genetic_algorithm
 
+
 # -----------------------------------------------------------
 # Utility functions for map display
 # -----------------------------------------------------------
 def display_node_map(farms, hubs, centers):
     """
-    Displays a map with Farms, Hubs, and Centers in different colors.
+    Displays a map with Farms (red), Hubs (blue), and Centers (green).
     """
     if not farms and not hubs and not centers:
         st.info("No data to display on map.")
@@ -104,11 +106,12 @@ def display_node_map(farms, hubs, centers):
                     map_style="mapbox://styles/mapbox/light-v9")
     st.pydeck_chart(deck)
 
+
 def display_distance_map(dist_dict, farms, hubs, centers):
     """
-    Displays the route paths on the map.  
-    If a road entry in dist_dict does not include a 'geometry' field, a simulated
-    road is generated as [ [lon1, lat1], [lon2, lat2] ].
+    Displays the route paths on the map from dist_dict data.
+    If a road entry does not include a 'geometry' field, a simple
+    two-point path is generated: [ [lon1, lat1], [lon2, lat2] ].
     """
     lines = []
     texts = []
@@ -128,24 +131,23 @@ def display_distance_map(dist_dict, farms, hubs, centers):
     for (t1, id1, t2, id2), roads in dist_dict.items():
         if not roads:
             continue
-        # Choose route_id==1
+        # Choose route_id==1 as the primary route
         primary = next((r for r in roads if r.get("route_id") == 1), None)
         if primary is None:
             continue
 
         dist_km = primary.get("distance_km")
-        # Use 'geometry' if it exists; otherwise generate a simple 2-point path
         geom = primary.get("geometry")
         if not geom:
             loc1 = get_location(t1, id1)
             loc2 = get_location(t2, id2)
             if loc1 and loc2:
-                # Format: [ [lon, lat], [lon, lat] ]
+                # Format for pydeck: [ [lon, lat], [lon, lat] ]
                 geom = [[loc1[1], loc1[0]], [loc2[1], loc2[0]]]
             else:
                 continue
 
-        # Use the first coordinate for the text position
+        # We'll place a small text label near the midpoint of the path
         mid_lon = (geom[0][0] + geom[-1][0]) / 2
         mid_lat = (geom[0][1] + geom[-1][1]) / 2
         lines.append({
@@ -197,6 +199,172 @@ def display_distance_map(dist_dict, farms, hubs, centers):
                     map_style="mapbox://styles/mapbox/light-v9")
     st.pydeck_chart(deck)
 
+
+# -----------------------------------------------------------
+# Analytics/Comparison Section (re-using solutions from session)
+# -----------------------------------------------------------
+def show_comparisons():
+    """
+    Create a comparison of LP, Greedy, and GA solutions stored in st.session_state.
+    Plots various charts (bar, pie, line, scatter) to analyze total cost/spoilage cost.
+    """
+    # Pull solutions from session_state
+    lp_data = st.session_state.get("lp_solution", {})
+    greedy_data = st.session_state.get("greedy_solution", {})
+    ga_data = st.session_state.get("ga_solution", {})
+
+    # Extract relevant data
+    methods = ['Linear Programming', 'Greedy-KMeans', 'Genetic Algorithm']
+
+    # Safely get the needed metrics
+    lp_total_cost = lp_data.get('best_cost', 0)
+    lp_spoilage_cost = lp_data.get('total_spoilage_cost', 0)
+
+    # For Greedy, we store total_cost in "total_cost"; spoilage can be a sum of cluster_spoilage
+    gr_total_cost = greedy_data.get('total_cost', 0)
+    gr_spoilage_cost = sum(cluster.get('cluster_spoilage', 0)
+                           for cluster in greedy_data.get('clusters', []))
+
+    # For GA
+    ga_total_cost = ga_data.get('best_cost', 0)
+    ga_spoilage_cost = ga_data.get('total_spoilage_cost', 0)
+
+    data = {
+        'Method': methods,
+        'Total Cost': [
+            lp_total_cost,
+            gr_total_cost,
+            ga_total_cost
+        ],
+        'Total Spoilage Cost': [
+            lp_spoilage_cost,
+            gr_spoilage_cost,
+            ga_spoilage_cost
+        ]
+    }
+
+    df = pd.DataFrame(data)
+
+    # If all zero, probably no solutions computed
+    if df['Total Cost'].sum() == 0 and df['Total Spoilage Cost'].sum() == 0:
+        st.warning("No valid solutions found in session. Generate or load solutions first.")
+        return
+
+    st.title("Optimization Methods Analytics")
+    st.write("Analyze and compare the performance of optimization methods based on total cost and spoilage cost.")
+
+    # Sidebar filters (optional: can omit or keep)
+    st.sidebar.header("Filter Methods")
+    methods_to_display = st.sidebar.multiselect(
+        "Select Methods to Display",
+        methods,
+        default=methods
+    )
+    filtered_df = df[df['Method'].isin(methods_to_display)]
+
+    # Display data table
+    st.subheader("Comparison Data")
+    st.dataframe(filtered_df)
+
+    # Bar charts for total cost and spoilage cost
+    st.subheader("Cost Comparisons")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("### Total Cost")
+        fig, ax = plt.subplots()
+        ax.bar(filtered_df['Method'], filtered_df['Total Cost'], color=['blue', 'green', 'orange'])
+        ax.set_xlabel("Method")
+        ax.set_ylabel("Total Cost")
+        ax.set_title("Total Cost by Method")
+        st.pyplot(fig)
+
+    with col2:
+        st.write("### Total Spoilage Cost")
+        fig, ax = plt.subplots()
+        ax.bar(filtered_df['Method'], filtered_df['Total Spoilage Cost'], color=['blue', 'green', 'orange'])
+        ax.set_xlabel("Method")
+        ax.set_ylabel("Total Spoilage Cost")
+        ax.set_title("Total Spoilage Cost by Method")
+        st.pyplot(fig)
+
+    # Pie charts for proportions
+    st.subheader("Proportional Breakdown")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("### Proportion of Total Cost")
+        fig_pie_cost = px.pie(
+            filtered_df,
+            values="Total Cost",
+            names="Method",
+            title="Total Cost Proportions"
+        )
+        st.plotly_chart(fig_pie_cost)
+
+    with col2:
+        st.write("### Proportion of Spoilage Cost")
+        fig_pie_spoilage = px.pie(
+            filtered_df,
+            values="Total Spoilage Cost",
+            names="Method",
+            title="Total Spoilage Cost Proportions"
+        )
+        st.plotly_chart(fig_pie_spoilage)
+
+    # Line chart for trends
+    st.subheader("Trends Across Methods")
+    fig_line = px.line(
+        filtered_df.melt(id_vars=["Method"], value_vars=["Total Cost", "Total Spoilage Cost"]),
+        x="Method", y="value", color="variable",
+        title="Trends: Total Cost vs Total Spoilage Cost",
+        labels={"value": "Cost", "variable": "Cost Type"}
+    )
+    st.plotly_chart(fig_line)
+
+    # Scatter plot for cost relationships
+    st.subheader("Cost Relationships")
+    fig_scatter = px.scatter(
+        filtered_df,
+        x="Total Cost",
+        y="Total Spoilage Cost",
+        color="Method",
+        size="Total Spoilage Cost",
+        title="Total Cost vs Total Spoilage Cost",
+        labels={"Total Cost": "Total Cost", "Total Spoilage Cost": "Total Spoilage Cost"}
+    )
+    st.plotly_chart(fig_scatter)
+
+    # Highlight insights
+    st.subheader("Insights")
+
+    # Because the user can de-select some methods in the sidebar,
+    # we must ensure there's at least one row in `filtered_df`.
+    if len(filtered_df) > 0:
+        min_cost_method = filtered_df.loc[filtered_df['Total Cost'].idxmin(), 'Method']
+        min_spoilage_method = filtered_df.loc[filtered_df['Total Spoilage Cost'].idxmin(), 'Method']
+        max_cost_method = filtered_df.loc[filtered_df['Total Cost'].idxmax(), 'Method']
+        max_spoilage_method = filtered_df.loc[filtered_df['Total Spoilage Cost'].idxmax(), 'Method']
+
+        st.write(f"### Lowest Total Cost:")
+        st.write(f"- *Method:* {min_cost_method}")
+        st.write(f"- *Cost:* {filtered_df['Total Cost'].min()}")
+
+        st.write(f"### Lowest Total Spoilage Cost:")
+        st.write(f"- *Method:* {min_spoilage_method}")
+        st.write(f"- *Spoilage Cost:* {filtered_df['Total Spoilage Cost'].min()}")
+
+        st.write(f"### Highest Total Cost:")
+        st.write(f"- *Method:* {max_cost_method}")
+        st.write(f"- *Cost:* {filtered_df['Total Cost'].max()}")
+
+        st.write(f"### Highest Total Spoilage Cost:")
+        st.write(f"- *Method:* {max_spoilage_method}")
+        st.write(f"- *Spoilage Cost:* {filtered_df['Total Spoilage Cost'].max()}")
+    else:
+        st.info("No methods selected or no data to display insights.")
+
+
 # -----------------------------------------------------------
 # Main Dashboard
 # -----------------------------------------------------------
@@ -211,7 +379,7 @@ def main():
             st.session_state[key] = [] if key != "dist_dict" else {}
 
     # ----------------------------
-    # MANUAL INPUT MODE: Enhanced using forms
+    # MANUAL INPUT MODE
     # ----------------------------
     if input_mode == "Manual":
         st.sidebar.subheader("Enter Numbers of Entities")
@@ -340,7 +508,9 @@ def main():
             for i, v in enumerate(st.session_state["vehicles"]):
                 st.markdown(f"**Vehicle #{i}**")
                 vid = st.number_input(f"Vehicle ID", value=v["id"], key=f"veh_id_{i}")
-                vtype = st.selectbox(f"Type", options=["small", "large"], index=(0 if v["type"]=="small" else 1), key=f"veh_type_{i}")
+                vtype = st.selectbox(f"Type", options=["small", "large"],
+                                     index=(0 if v["type"] == "small" else 1),
+                                     key=f"veh_type_{i}")
                 cap = st.number_input(f"Capacity", value=int(v["capacity"]), key=f"veh_cap_{i}")
                 fcost = st.number_input(f"Fixed Cost", value=float(v["fixed_cost"]), key=f"veh_fcost_{i}")
                 varcost = st.number_input(f"Variable Cost Per Distance", value=float(v["variable_cost_per_distance"]), key=f"veh_varcost_{i}")
@@ -395,7 +565,11 @@ def main():
     # Map of Nodes
     # ----------------------------
     st.subheader("3) Map of Farms, Hubs, and Centers")
-    display_node_map(st.session_state["farms"], st.session_state["hubs"], st.session_state["centers"])
+    display_node_map(
+        st.session_state["farms"],
+        st.session_state["hubs"],
+        st.session_state["centers"]
+    )
 
     # ----------------------------
     # Build Distance Matrix
@@ -417,15 +591,14 @@ def main():
         sample_items = list(st.session_state["dist_dict"].items())[:10]
         st.write(sample_items)
 
-        # for k, v in sample_items:
-            # print (f"{k}: {v}")
-
         st.subheader("Optional: Display Distance Map")
         if st.button("Show Distances on Map"):
-            display_distance_map(st.session_state["dist_dict"],
-                                 st.session_state["farms"],
-                                 st.session_state["hubs"],
-                                 st.session_state["centers"])
+            display_distance_map(
+                st.session_state["dist_dict"],
+                st.session_state["farms"],
+                st.session_state["hubs"],
+                st.session_state["centers"]
+            )
 
     # ----------------------------
     # Run Optimization / Benchmarks
@@ -482,7 +655,7 @@ def main():
             return
         st.write("**Greedy Solution JSON**:")
         st.json(gsol)
-        # Simple route map: draw farm->hub lines
+        # Simple route map: farm->hub lines
         lines = []
         for cl in gsol.get("clusters", []):
             hub_id = cl.get("hub_id")
@@ -578,7 +751,7 @@ def main():
             return
         st.write("**GA Solution JSON**:")
         st.json(ga_sol)
-        # Draw GA routes: plot both farm->hub and hub->center for each unit shipment
+        # Draw GA routes: plot farm->hub and hub->center
         lines = []
         for route in ga_sol.get("detailed_routes", []):
             fid = route["farm_id"]
@@ -637,6 +810,10 @@ def main():
     st.subheader("7) Timeline (Concept)")
     timeline_data = []
     lp_sol = st.session_state.get("lp_solution")
+    gr_sol = st.session_state.get("greedy_solution")
+    ga_sol = st.session_state.get("ga_solution")
+
+    # Example: from LP solution
     if lp_sol and "detailed_routes" in lp_sol:
         for route in lp_sol["detailed_routes"]:
             fid = route["farm_id"]
@@ -654,8 +831,9 @@ def main():
                 "end": 2,
                 "stage": "Hub->Center"
             })
-    elif st.session_state.get("greedy_solution"):
-        for cl in st.session_state["greedy_solution"].get("clusters", []):
+    # Example: from Greedy solution
+    elif gr_sol and "clusters" in gr_sol:
+        for cl in gr_sol.get("clusters", []):
             hid = cl.get("hub_id")
             if hid is not None:
                 for cf in cl.get("cluster_farms", []):
@@ -665,14 +843,17 @@ def main():
                         "end": 1,
                         "stage": "Farm->Hub"
                     })
+                # We don't necessarily know which center is used,
+                # but for demonstration, we show "Hub->Center(?)"
                 timeline_data.append({
                     "entity": f"Hub{hid}->Center(?)",
                     "start": 1,
                     "end": 2,
                     "stage": "Hub->Center"
                 })
-    elif st.session_state.get("ga_solution"):
-        for route in st.session_state["ga_solution"].get("detailed_routes", []):
+    # Example: from GA solution
+    elif ga_sol and "detailed_routes" in ga_sol:
+        for route in ga_sol["detailed_routes"]:
             fid = route["farm_id"]
             hid = route["hub_id"]
             cid = route["center_id"]
@@ -698,6 +879,18 @@ def main():
             color='stage:N'
         ).properties(width=700, height=300)
         st.altair_chart(chart, use_container_width=True)
+
+    # ----------------------------
+    # 8) Compare Solutions (Analytics Section)
+    # ----------------------------
+    st.subheader("8) Compare Solutions")
+    st.write(
+        "Click the **Refresh Analytics** button below to compare the solutions "
+        "stored in memory (Greedy, LP, GA) in terms of total cost, spoilage cost, etc."
+    )
+    if st.button("Refresh Analytics"):
+        show_comparisons()
+
 
 if __name__ == "__main__":
     main()
