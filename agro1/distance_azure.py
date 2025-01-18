@@ -25,8 +25,12 @@ import math
 import requests
 import time
 import random
+import os
+from dotenv import load_dotenv
 
-AZURE_MAPS_KEY = "4j0DlBhKmXzbG2frDTurBFfAq6NPysfILisACKoao83EcEjvmEobJQQJ99BAACYeBjFeh7q1AAAgAZMP3Pj2"  # Put your valid Azure Maps key here if desired
+load_dotenv()  # Load variables from .env
+
+AZURE_MAPS_KEY = os.getenv("AZURE_MAPS_KEY")
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     R = 6371.0

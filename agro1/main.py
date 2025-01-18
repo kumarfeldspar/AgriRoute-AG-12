@@ -415,8 +415,10 @@ def main():
     if st.session_state["dist_dict"]:
         st.write("Distance Matrix (sample):")
         sample_items = list(st.session_state["dist_dict"].items())[:10]
-        for k, v in sample_items:
-            st.write(f"{k}: {v}")
+        st.write(sample_items)
+
+        # for k, v in sample_items:
+            # print (f"{k}: {v}")
 
         st.subheader("Optional: Display Distance Map")
         if st.button("Show Distances on Map"):
