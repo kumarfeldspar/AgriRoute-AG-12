@@ -2,333 +2,300 @@
 """
 linear_programming.py
 ---------------------
-Implements an LP (or MILP) using IBM CPLEX (via docplex) or fallback to PuLP with the CPLEX solver.
+A demonstration of an LP-based approach. We define x[f,h,c,v] = quantity farm->hub->center
+and minimize cost - profit.
 
-Objective:
-   Minimize: f(cost) - f(profit)
-Where:
-   f(cost) = Storage costs + Transport costs + Spoilage losses
-   f(profit) = Quantity delivered before deadlines
-
-We handle constraints:
- - Farm produce constraints (can't deliver more than produced).
- - Vehicle capacity constraints.
- - Hub capacity constraints.
- - Perishability/deadline constraints (simplified).
+We now store more details about each route in the final solution:
+ - distance farm->hub, distance hub->center
+ - cost for that route
+ - partial breakdown, etc.
 """
 
 import json
 import math
 import time
 
-# Try docplex or fallback to pulp
+# Attempt docplex or fallback to pulp
 try:
-    from docplex.mp.environment import Environment
     from docplex.mp.model import Model
     HAVE_DOCPLEX = True
 except ImportError:
     HAVE_DOCPLEX = False
-    from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpBinary, LpStatus, value, LpContinuous
+    from pulp import (LpProblem, LpMinimize, LpVariable, lpSum, LpContinuous, LpStatus, value)
 
+BIG_M = 999999
+
+def _pick_primary_distance(dist_list):
+    """
+    dist_list = [ {route_id:1, distance_km:x}, {route_id:2, ...} ]
+    We'll pick route_id=1 if it exists.
+    """
+    if not dist_list:
+        return None
+    for rd in dist_list:
+        if rd["route_id"] == 1:
+            return rd["distance_km"]
+    return None
 
 def run_linear_program(farms, hubs, centers, vehicles, dist_dict, output_file="lp_solution.json"):
-    """
-    Build and solve the LP or MILP. Return a solution dict and also write to JSON.
-
-    For demonstration, we only do single-stage routes (Farm->Hub->Center) in one step with
-    continuous decision variables. Real multi-trip, multi-vehicle routing is more complex.
-
-    solution = {
-       "method": "LinearProgramming",
-       "stage1_assignments": [...],
-       "stage2_assignments": [...],
-       "objective_value": ...,
-       "total_spoilage": ...,
-       "delivered_on_time": ...
-    }
-    """
     start_time = time.time()
-
     if HAVE_DOCPLEX:
         solution = _run_docplex_lp(farms, hubs, centers, vehicles, dist_dict)
     else:
         solution = _run_pulp_lp(farms, hubs, centers, vehicles, dist_dict)
 
     solution["runtime_sec"] = round(time.time() - start_time, 2)
+
+    # Dump to file
     with open(output_file, "w") as f:
         json.dump(solution, f, indent=4)
+
     return solution
 
-
 def _run_docplex_lp(farms, hubs, centers, vehicles, dist_dict):
-    """
-    Using docplex for the LP. Demonstration code. 
-    We create flow variables for:
-       x[fid, hid, cid, vid] = quantity of farm f produce delivered via hub h to center c by vehicle v
-    Then compute cost, spoilage, etc.
-    """
+    m = Model(name="AgroRouteLP_docplex")
 
-    m = Model(name="AgroRouteLP")
-
-    # For simplicity, we define a single super-variable for the entire route (farm->hub->center) with a single vehicle.
-    # We also define how to separate or compute cost from that.
-    # If dist_fh + dist_hc > perish_window, we consider that produce spoiled -> x=0 forced.
-
-    # Decision variables
+    # x[f,h,c,v] = quantity
     x = {}
+    # spoil_f = how much spoils from farm f
+    spoil_f = {}
+
+    for f in farms:
+        fid = f["id"]
+        spoil_f[fid] = m.continuous_var(lb=0, name=f"spoil_{fid}")
+
     for f in farms:
         fid = f["id"]
         for h in hubs:
             hid = h["id"]
-            dist_fh = dist_dict.get(("farm", fid, "hub", hid), None)
-            if dist_fh is None:
+            roads_fh = dist_dict.get(("farm", fid, "hub", hid), [])
+            d_fh = _pick_primary_distance(roads_fh)
+            if d_fh is None:
                 continue
             for c in centers:
                 cid = c["id"]
-                dist_hc = dist_dict.get(("hub", hid, "center", cid), None)
-                if dist_hc is None:
+                roads_hc = dist_dict.get(("hub", hid, "center", cid), [])
+                d_hc = _pick_primary_distance(roads_hc)
+                if d_hc is None:
                     continue
                 for v in vehicles:
                     vid = v["id"]
-                    varname = f"x_{fid}_{hid}_{cid}_{vid}"
-                    x[(fid,hid,cid,vid)] = m.continuous_var(lb=0, name=varname)
+                    var = m.continuous_var(lb=0, name=f"x_{fid}_{hid}_{cid}_{vid}")
+                    x[(fid,hid,cid,vid)] = var
 
-    # Build cost expression
-    # f(cost) = sum(transport_cost + storage_cost + spoilage)
-    # We'll handle spoilage in a simplified way: if time>perish window => forced x=0 in constraints.
-    transport_cost_expr = 0
-    storage_cost_expr = 0
-    # We'll define a variable for total spoil per farm:
-    spoil_vars = {}
-    for f in farms:
-        spoil_vars[f["id"]] = m.continuous_var(lb=0, name=f"spoil_{f['id']}")
+    # Constraints
 
-    # We'll define "delivered" as sum of x for each farm. We'll track how much meets the deadline.
-    # We can define an indicator if distance sum > deadline => no delivery or partial penalty. 
-    # For simplicity, if dist_fh + dist_hc > center.deadline => we treat it as spoiled. We'll enforce x=0.
-
-    # 1) Vehicle capacity constraints
-    # sum of x over all f,h,c for each vehicle v <= capacity (one big simplification).
+    # 1) Vehicle capacity: sum of x over all f,h,c for each vehicle v <= capacity
     for v in vehicles:
         vid = v["id"]
         cap = v["capacity"]
-        sum_expr = m.sum(x[k] for k in x.keys() if k[3] == vid)
+        sum_expr = m.sum(x[k] for k in x if k[3] == vid)
         m.add_constraint(sum_expr <= cap, f"veh_cap_{vid}")
 
-    # 2) Hub capacity constraints
-    # sum of x for all farms and centers for a single hub h <= hub.capacity
+    # 2) Hub capacity
     for h in hubs:
         hid = h["id"]
         cap = h["capacity"]
-        sum_expr = m.sum(x[k] for k in x.keys() if k[1] == hid)
+        sum_expr = m.sum(x[k] for k in x if k[1] == hid)
         m.add_constraint(sum_expr <= cap, f"hub_cap_{hid}")
 
-    # 3) Farm produce constraints
-    # sum of x across all h,c,v for farm f <= f["produce_quantity"]
+    # 3) Farm produce: sum of x + spoil = produce_quantity
     for f in farms:
         fid = f["id"]
         qty = f["produce_quantity"]
-        sum_expr = m.sum(x[k] for k in x.keys() if k[0] == fid)
-        m.add_constraint(sum_expr + spoil_vars[fid] == qty, f"farm_qty_{fid}")
+        sum_expr = m.sum(x[k] for k in x if k[0] == fid)
+        m.add_constraint(sum_expr + spoil_f[fid] == qty, f"farm_qty_{fid}")
 
-    # 4) Center demand constraints (we can try to meet or exceed, or treat as cost if missed).
-    # For demonstration, let's say we can meet or exceed. No strict requirement here.
-    # We won't add a constraint that sum >= demand, but we can track profit from actual delivered portion.
-    # 5) Distance-based spoilage: if dist_fh + dist_hc > f.perish_window => x=0 forced.
+    # 4) Perishability constraint: if distance > window => x=0
     for f in farms:
         fid = f["id"]
         pw = f["perishability_window"]
         for h in hubs:
             hid = h["id"]
-            dist_fh = dist_dict.get(("farm", fid, "hub", hid), None)
-            if dist_fh is None:
+            roads_fh = dist_dict.get(("farm", fid, "hub", hid), [])
+            d_fh = _pick_primary_distance(roads_fh)
+            if d_fh is None:
                 continue
             for c in centers:
                 cid = c["id"]
-                dist_hc = dist_dict.get(("hub", hid, "center", cid), None)
-                if dist_hc is None:
+                roads_hc = dist_dict.get(("hub", hid, "center", cid), [])
+                d_hc = _pick_primary_distance(roads_hc)
+                if d_hc is None:
                     continue
-                total_dist = dist_fh + dist_hc
-                if total_dist > pw:
-                    # Force x=0
+                total_d = d_fh + d_hc
+                if total_d > pw:
                     for v in vehicles:
                         vid = v["id"]
                         if (fid,hid,cid,vid) in x:
-                            m.add_constraint(x[(fid,hid,cid,vid)] == 0, f"spoil_{fid}_{hid}_{cid}_{vid}")
+                            m.add_constraint(x[(fid,hid,cid,vid)] == 0)
 
-    # Build cost terms for each x:
+    # Build cost and profit expressions
     cost_terms = []
     profit_terms = []
 
-    for (fid,hid,cid,vid) in x:
+    def storage_cost_per_unit(hub):
+        # approximate: storage cost + fraction of fixed usage
+        return hub["storage_cost_per_unit"] + (hub["fixed_usage_cost"] / max(1, hub["capacity"]))
+
+    # Spoilage cost: e.g. 2 currency per unit spoiled
+    spoil_cost_expr = m.sum(2 * spoil_f[f["id"]] for f in farms)
+
+    for (fid,hid,cid,vid), var in x.items():
         fobj = next(ff for ff in farms if ff["id"] == fid)
         hobj = next(hh for hh in hubs if hh["id"] == hid)
         cobj = next(cc for cc in centers if cc["id"] == cid)
         vobj = next(vv for vv in vehicles if vv["id"] == vid)
 
-        dist_fh = dist_dict[("farm", fid, "hub", hid)]
-        dist_hc = dist_dict[("hub", hid, "center", cid)]
-        # Transport cost: vehicle fixed + variable * distance?
-        # We'll approximate: cost = fixed_cost + (dist_fh+dist_hc)*var_cost, but that's if the vehicle is used only once
-        # More advanced modeling would have binary usage variables. Let's do a naive proportion approach:
-        # We'll do: cost = x/(vehicle capacity) * [fixed_cost + (dist_fh+dist_hc)*var_cost]
-        # This is a common "fractional usage" assumption (not 100% correct for integral VRP).
-        dist_total = dist_fh + dist_hc
+        # distances:
+        d_fh = _pick_primary_distance(dist_dict.get(("farm", fid, "hub", hid), []))
+        d_hc = _pick_primary_distance(dist_dict.get(("hub", hid, "center", cid), []))
+        if d_fh is None or d_hc is None:
+            continue
+
+        dist_total = d_fh + d_hc
+        # transport cost fraction
         cost_per_unit = (vobj["fixed_cost"] + dist_total * vobj["variable_cost_per_distance"]) / vobj["capacity"]
-
-        # Storage cost: x * hobj["storage_cost_per_unit"] (assuming 1 time unit) + fixed_usage_cost if x>0
-        # We'll similarly do a fraction: cost for usage = x/(hub capacity)*hub.fixed_usage_cost
-        # + x*hobj.storage_cost_per_unit
-        store_cost_per_unit = hobj["storage_cost_per_unit"] + (hobj["fixed_usage_cost"] / max(1,hobj["capacity"]))
-
-        # Build expression
-        cost_expr = x[(fid,hid,cid,vid)] * (cost_per_unit + store_cost_per_unit)
+        # storage
+        store_per_unit = storage_cost_per_unit(hobj)
+        cost_expr = var * (cost_per_unit + store_per_unit)
         cost_terms.append(cost_expr)
 
-        # Profit: if total_dist <= cobj["deadline"], we count it as on-time
+        # if dist_total <= cobj["deadline"], we get profit = var
         if dist_total <= cobj["deadline"]:
-            # Profit = x units delivered
-            profit_terms.append(x[(fid,hid,cid,vid)])
+            profit_terms.append(var)
         else:
             profit_terms.append(0)
 
-    # Spoilage cost: we define a simple cost per spoil, say 2 units cost for each produce spoiled
-    spoil_cost_expr = 0
-    for f in farms:
-        spoil_cost_expr += 2 * spoil_vars[f["id"]]
-
-    # Objective = sum(cost) + sum(spoil_cost) - sum(profit)
     total_cost_expr = m.sum(cost_terms) + spoil_cost_expr
     total_profit_expr = m.sum(profit_terms)
-    # We want to minimize (cost_expr - profit_expr)
-    obj_expr = total_cost_expr - total_profit_expr
-
-    m.minimize(obj_expr)
+    # Minimize cost - profit
+    m.minimize(total_cost_expr - total_profit_expr)
 
     sol = m.solve(log_output=False)
     if sol is None:
         return {
             "method": "LinearProgramming(docplex)",
             "status": "No feasible solution",
-            "stage1_assignments": [],
-            "stage2_assignments": [],
             "objective_value": None,
+            "detailed_routes": [],
             "total_spoilage": None,
             "delivered_on_time": 0
         }
 
-    # Build solution output
-    stage1 = []
-    stage2 = []
-    total_spoil = 0
-    for f in farms:
-        total_spoil += spoil_vars[f["id"]].solution_value
+    # Build solution
+    stage_routes = []
+    total_spoil = sum(spoil_f[f["id"]].solution_value for f in farms)
     delivered_on_time = 0
-    for (fid,hid,cid,vid) in x:
-        qty = x[(fid,hid,cid,vid)].solution_value
+    for (fid,hid,cid,vid), var in x.items():
+        qty = var.solution_value
         if qty > 1e-6:
-            # We treat stage1 = farm->hub, stage2 = hub->center in aggregated form
-            stage1.append({
+            # gather info
+            fobj = next(ff for ff in farms if ff["id"] == fid)
+            hobj = next(hh for hh in hubs if hh["id"] == hid)
+            cobj = next(cc for cc in centers if cc["id"] == cid)
+            vobj = next(vv for vv in vehicles if vv["id"] == vid)
+
+            d_fh = _pick_primary_distance(dist_dict.get(("farm", fid, "hub", hid), []))
+            d_hc = _pick_primary_distance(dist_dict.get(("hub", hid, "center", cid), []))
+            dist_total = d_fh + d_hc
+            # cost
+            cost_pu = (vobj["fixed_cost"] + dist_total * vobj["variable_cost_per_distance"]) / vobj["capacity"]
+            store_pu = (hobj["storage_cost_per_unit"] + (hobj["fixed_usage_cost"]/max(1,hobj["capacity"])))
+            route_cost = qty*(cost_pu + store_pu)
+            on_time = (1 if dist_total <= cobj["deadline"] else 0)
+            if on_time:
+                delivered_on_time += qty
+
+            stage_routes.append({
                 "farm_id": fid,
-                "hub_id": hid,
-                "vehicle_id": vid,
-                "quantity": qty
-            })
-            stage2.append({
                 "hub_id": hid,
                 "center_id": cid,
                 "vehicle_id": vid,
-                "quantity": qty
+                "quantity": qty,
+                "dist_farm_hub": d_fh,
+                "dist_hub_center": d_hc,
+                "total_dist": dist_total,
+                "route_cost": round(route_cost, 3),
+                "on_time": bool(on_time)
             })
-            fobj = next(ff for ff in farms if ff["id"] == fid)
-            cobj = next(cc for cc in centers if cc["id"] == cid)
-            dist_fh = dist_dict[("farm", fid, "hub", hid)]
-            dist_hc = dist_dict[("hub", hid, "center", cid)]
-            if (dist_fh + dist_hc) <= cobj["deadline"]:
-                delivered_on_time += qty
 
     solution = {
         "method": "LinearProgramming(docplex)",
-        "status": str(sol.solve_status),
+        "status": str(sol.solve_status),  # convert to string
         "objective_value": sol.objective_value,
-        "stage1_assignments": stage1,
-        "stage2_assignments": stage2,
-        "total_spoilage": total_spoil,
-        "delivered_on_time": delivered_on_time
+        "detailed_routes": stage_routes,
+        "total_spoilage": round(total_spoil, 2),
+        "delivered_on_time": round(delivered_on_time, 2)
     }
     return solution
 
-
 def _run_pulp_lp(farms, hubs, centers, vehicles, dist_dict):
-    """
-    Fallback using PuLP, configured to use CPLEX if available. Similar logic to docplex version.
-    """
+    model = LpProblem("AgroRouteLP_pulp", LpMinimize)
 
-    model = LpProblem("AgroRouteLP", LpMinimize)
-
-    # Decision variables
     x = {}
+    spoil_vars = {}
+
+    for f in farms:
+        fid = f["id"]
+        spoil_vars[fid] = LpVariable(f"spoil_{fid}", lowBound=0, cat="Continuous")
+
     for f in farms:
         fid = f["id"]
         for h in hubs:
             hid = h["id"]
-            dist_fh = dist_dict.get(("farm", fid, "hub", hid), None)
-            if dist_fh is None:
+            roads_fh = dist_dict.get(("farm", fid, "hub", hid), [])
+            d_fh = _pick_primary_distance(roads_fh)
+            if d_fh is None:
                 continue
             for c in centers:
                 cid = c["id"]
-                dist_hc = dist_dict.get(("hub", hid, "center", cid), None)
-                if dist_hc is None:
+                roads_hc = dist_dict.get(("hub", hid, "center", cid), [])
+                d_hc = _pick_primary_distance(roads_hc)
+                if d_hc is None:
                     continue
                 for v in vehicles:
                     vid = v["id"]
                     varname = f"x_{fid}_{hid}_{cid}_{vid}"
                     x[(fid,hid,cid,vid)] = LpVariable(varname, lowBound=0, cat="Continuous")
 
-    # Spoilage variables
-    spoil_vars = {}
-    for f in farms:
-        fid = f["id"]
-        spoil_vars[fid] = LpVariable(f"spoil_{fid}", lowBound=0, cat="Continuous")
-
-    # Capacity constraints
+    # capacity constraints
     for v in vehicles:
         vid = v["id"]
         cap = v["capacity"]
-        model += lpSum(x[k] for k in x.keys() if k[3] == vid) <= cap, f"veh_cap_{vid}"
+        model += lpSum(x[k] for k in x if k[3] == vid) <= cap, f"veh_cap_{vid}"
 
     for h in hubs:
         hid = h["id"]
         cap = h["capacity"]
-        model += lpSum(x[k] for k in x.keys() if k[1] == hid) <= cap, f"hub_cap_{hid}"
+        model += lpSum(x[k] for k in x if k[1] == hid) <= cap, f"hub_cap_{hid}"
 
     for f in farms:
         fid = f["id"]
         qty = f["produce_quantity"]
-        model += lpSum(x[k] for k in x.keys() if k[0] == fid) + spoil_vars[fid] == qty, f"farm_qty_{fid}"
+        model += lpSum(x[k] for k in x if k[0] == fid) + spoil_vars[fid] == qty, f"farm_qty_{fid}"
 
-    # Distance-based spoil
+    # perish
     for f in farms:
         fid = f["id"]
         pw = f["perishability_window"]
         for h in hubs:
             hid = h["id"]
-            dist_fh = dist_dict.get(("farm", fid, "hub", hid), None)
-            if dist_fh is None:
+            d_fh = _pick_primary_distance(dist_dict.get(("farm", fid, "hub", hid), []))
+            if d_fh is None:
                 continue
             for c in centers:
                 cid = c["id"]
-                dist_hc = dist_dict.get(("hub", hid, "center", cid), None)
-                if dist_hc is None:
+                d_hc = _pick_primary_distance(dist_dict.get(("hub", hid, "center", cid), []))
+                if d_hc is None:
                     continue
-                total_dist = dist_fh + dist_hc
+                total_dist = 0 if (d_fh is None or d_hc is None) else d_fh + d_hc
                 if total_dist > pw:
                     for v in vehicles:
                         vid = v["id"]
                         if (fid,hid,cid,vid) in x:
                             model += x[(fid,hid,cid,vid)] == 0
 
-    # Cost + Profit
+    # build cost - profit
     cost_terms = []
     profit_terms = []
     for (fid,hid,cid,vid), var in x.items():
@@ -337,78 +304,76 @@ def _run_pulp_lp(farms, hubs, centers, vehicles, dist_dict):
         cobj = next(cc for cc in centers if cc["id"] == cid)
         vobj = next(vv for vv in vehicles if vv["id"] == vid)
 
-        dist_fh = dist_dict[("farm", fid, "hub", hid)]
-        dist_hc = dist_dict[("hub", hid, "center", cid)]
-        dist_total = dist_fh + dist_hc
-        # Simplify cost
-        cost_per_unit = (vobj["fixed_cost"] + dist_total * vobj["variable_cost_per_distance"]) / vobj["capacity"]
-        store_cost_per_unit = hobj["storage_cost_per_unit"] + (hobj["fixed_usage_cost"] / max(1,hobj["capacity"]))
-
-        cost_expr = var * (cost_per_unit + store_cost_per_unit)
+        d_fh = _pick_primary_distance(dist_dict.get(("farm", fid, "hub", hid), []))
+        d_hc = _pick_primary_distance(dist_dict.get(("hub", hid, "center", cid), []))
+        dist_total = d_fh + d_hc
+        cost_pu = (vobj["fixed_cost"] + dist_total*vobj["variable_cost_per_distance"]) / vobj["capacity"]
+        store_pu = (hobj["storage_cost_per_unit"] + hobj["fixed_usage_cost"]/max(1,hobj["capacity"]))
+        cost_expr = var*(cost_pu + store_pu)
         cost_terms.append(cost_expr)
 
-        # Profit if total_dist <= cobj.deadline
         if dist_total <= cobj["deadline"]:
             profit_terms.append(var)
         else:
             profit_terms.append(0)
 
-    spoil_cost_expr = lpSum(2 * spoil_vars[f["id"]] for f in farms)
+    spoil_cost_expr = lpSum(2*spoil_vars[f["id"]] for f in farms)
 
-    total_cost_expr = lpSum(cost_terms) + spoil_cost_expr
-    total_profit_expr = lpSum(profit_terms)
+    model += lpSum(cost_terms) + spoil_cost_expr - lpSum(profit_terms), "Objective"
 
-    model += total_cost_expr - total_profit_expr, "Objective"
-
-    model_status = model.solve()  # if cplex is installed, can do model.solve(pulp.CPLEX_PY())
+    status = model.solve()
     status_str = LpStatus[model.status]
-    if status_str not in ["Optimal", " feasible"]:
+    if status_str not in ["Optimal", "Feasible"]:
         return {
-            "method": "LinearProgramming(PuLP+CPLEX)",
+            "method": "LinearProgramming(PuLP)",
             "status": status_str,
-            "stage1_assignments": [],
-            "stage2_assignments": [],
             "objective_value": None,
+            "detailed_routes": [],
             "total_spoilage": None,
             "delivered_on_time": 0
         }
 
-    # Gather solution
-    stage1 = []
-    stage2 = []
-    total_spoil = 0
-    for f in farms:
-        total_spoil += spoil_vars[f["id"]].varValue
-
+    # build solution
+    stage_routes = []
+    total_spoil = sum(spoil_vars[f["id"]].varValue for f in farms)
     delivered_on_time = 0
     for (fid,hid,cid,vid), var in x.items():
         qty = var.varValue
         if qty > 1e-6:
-            stage1.append({
+            fobj = next(ff for ff in farms if ff["id"] == fid)
+            hobj = next(hh for hh in hubs if hh["id"] == hid)
+            cobj = next(cc for cc in centers if cc["id"] == cid)
+            vobj = next(vv for vv in vehicles if vv["id"] == vid)
+
+            d_fh = _pick_primary_distance(dist_dict.get(("farm", fid, "hub", hid), []))
+            d_hc = _pick_primary_distance(dist_dict.get(("hub", hid, "center", cid), []))
+            dist_total = d_fh + d_hc
+            cost_pu = (vobj["fixed_cost"] + dist_total*vobj["variable_cost_per_distance"]) / vobj["capacity"]
+            store_pu = (hobj["storage_cost_per_unit"] + hobj["fixed_usage_cost"]/max(1,hobj["capacity"]))
+            route_cost = qty*(cost_pu + store_pu)
+            on_time = (dist_total <= cobj["deadline"])
+            if on_time:
+                delivered_on_time += qty
+
+            stage_routes.append({
                 "farm_id": fid,
-                "hub_id": hid,
-                "vehicle_id": vid,
-                "quantity": qty
-            })
-            stage2.append({
                 "hub_id": hid,
                 "center_id": cid,
                 "vehicle_id": vid,
-                "quantity": qty
+                "quantity": qty,
+                "dist_farm_hub": d_fh,
+                "dist_hub_center": d_hc,
+                "total_dist": dist_total,
+                "route_cost": round(route_cost, 3),
+                "on_time": on_time
             })
-            cobj = next(cc for cc in centers if cc["id"] == cid)
-            dist_fh = dist_dict[("farm", fid, "hub", hid)]
-            dist_hc = dist_dict[("hub", hid, "center", cid)]
-            if (dist_fh + dist_hc) <= cobj["deadline"]:
-                delivered_on_time += qty
 
     solution = {
-        "method": "LinearProgramming(PuLP+CPLEX)",
+        "method": "LinearProgramming(PuLP)",
         "status": status_str,
         "objective_value": value(model.objective),
-        "stage1_assignments": stage1,
-        "stage2_assignments": stage2,
-        "total_spoilage": total_spoil,
-        "delivered_on_time": delivered_on_time
+        "detailed_routes": stage_routes,
+        "total_spoilage": round(total_spoil,2),
+        "delivered_on_time": round(delivered_on_time,2)
     }
     return solution

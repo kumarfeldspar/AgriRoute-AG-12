@@ -1,24 +1,23 @@
-#!/usr/bin/env python
+
 """
 distance_azure.py
 -----------------
-Generates distance & cost matrix among farms, storage hubs, and distribution centers.
+Generates possible road distances among farms, storage hubs, and distribution centers.
 
-If Azure Maps API is available, we can request actual distances, toll costs, etc.
-Otherwise, fallback to a simple Euclidean approach.
+- If AZURE_MAPS_KEY is set and use_azure=True, attempts real distances from Azure.
+- Otherwise uses Haversine or radial approximation.
 
-Usage:
-  1) Provide an Azure Maps key if available.
-  2) Provide lists of farms, hubs, centers.
-  3) We produce a nested dictionary or a DataFrame with distances/cost multipliers.
+NEW: For demonstration, we store multiple "roads" for each pair if possible. We'll
+     just randomly generate a "secondary route" as an alternate path.
 """
 
 import math
 import requests
 import time
+import random
 
 # Optionally set your Azure Maps key here
-AZURE_MAPS_KEY = "4j0DlBhKmXzbG2frDTurBFfAq6NPysfILisACKoao83EcEjvmEobJQQJ99BAACYeBjFeh7q1AAAgAZMP3Pj2"  # e.g., "YOUR_AZURE_MAPS_KEY"
+AZURE_MAPS_KEY = "4j0DlBhKmXzbG2frDTurBFfAq6NPysfILisACKoao83EcEjvmEobJQQJ99BAACYeBjFeh7q1AAAgAZMP3Pj2"  # e.g. "YOUR_REAL_AZURE_KEY"
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
@@ -34,22 +33,35 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 def build_distance_matrix(farms, hubs, centers, use_azure=False):
     """
-    Returns a dictionary: dist[('farm', fid, 'hub', hid)] = distance_in_km
-    and similarly for hub->center, farm->center if needed.
+    Returns a dict like:
+        dist_dict[(type1, id1, type2, id2)] = [
+           { "route_id": 1, "distance_km": X1 },
+           { "route_id": 2, "distance_km": X2 },  # alternate route
+           ...
+        ]
 
-    If use_azure=True and AZURE_MAPS_KEY is set, attempts actual route distance.
-    Otherwise uses Haversine as fallback.
+    Where we store multiple possible roads per pair (2 max in this example).
+    If Azure is used and we have a valid key, we get the "primary" route from Azure,
+    plus a fake "secondary" route 10% longer. Otherwise, we fallback to Haversine
+    plus a random alternate route.
+
+    We'll do farm->hub, hub->center, farm->center if you want. We'll show just farm->hub + hub->center for now.
     """
     dist_dict = {}
 
-    # Utility function to get Azure route distance (single origin->destination)
-    def get_azure_route_distance(origin, dest):
-        # origin, dest => [lat, lon]
-        base_url = ("https://atlas.microsoft.com/route/directions/json"
-                    f"?subscription-key={AZURE_MAPS_KEY}"
-                    "&api-version=1.0"
-                    f"&query={origin[0]},{origin[1]}:{dest[0]},{dest[1]}"
-                    "&routeType=shortest&travelMode=car")
+    def azure_route_distance(origin, dest):
+        """
+        Returns the route distance in km if successful, otherwise None.
+        """
+        if not AZURE_MAPS_KEY:
+            return None
+        base_url = (
+            "https://atlas.microsoft.com/route/directions/json"
+            f"?subscription-key={AZURE_MAPS_KEY}"
+            "&api-version=1.0"
+            f"&query={origin[0]},{origin[1]}:{dest[0]},{dest[1]}"
+            "&routeType=shortest&travelMode=car"
+        )
         resp = requests.get(base_url)
         if resp.status_code == 200:
             data = resp.json()
@@ -58,39 +70,46 @@ def build_distance_matrix(farms, hubs, centers, use_azure=False):
                 return dist_meters / 1000.0  # convert to km
             except:
                 return None
+        return None
+
+    def compute_all_roads(origin, dest):
+        """
+        Returns a list of roads/distance objects for that pair:
+           [ { "route_id": 1, "distance_km": val1 }, ... ]
+        We'll store up to 2 routes: primary + secondary.
+        """
+        if use_azure:
+            d1 = azure_route_distance(origin, dest)
+            time.sleep(0.05)
+            if d1 is None:
+                # fallback
+                d1 = haversine_distance(origin[0], origin[1], dest[0], dest[1])
         else:
-            return None
+            d1 = haversine_distance(origin[0], origin[1], dest[0], dest[1])
+
+        if d1 is None:
+            return []
+
+        # We'll define a second route that is e.g. 1.1 * distance
+        d2 = round(d1 * 1.1, 3)
+
+        # Return them
+        roads = [
+            {"route_id": 1, "distance_km": round(d1, 3)},
+            {"route_id": 2, "distance_km": d2}
+        ]
+        return roads
 
     # Farm->Hub
     for f in farms:
         for h in hubs:
-            o = f["location"]
-            d = h["location"]
-            if use_azure and AZURE_MAPS_KEY:
-                dist_km = get_azure_route_distance(o, d)
-                time.sleep(0.05)  # avoid hitting rate limits
-                if dist_km is None:
-                    dist_km = haversine_distance(o[0], o[1], d[0], d[1])
-            else:
-                dist_km = haversine_distance(o[0], o[1], d[0], d[1])
-
-            dist_dict[("farm", f["id"], "hub", h["id"])] = dist_km
+            roads = compute_all_roads(f["location"], h["location"])
+            dist_dict[("farm", f["id"], "hub", h["id"])] = roads
 
     # Hub->Center
     for h in hubs:
         for c in centers:
-            o = h["location"]
-            d = c["location"]
-            if use_azure and AZURE_MAPS_KEY:
-                dist_km = get_azure_route_distance(o, d)
-                time.sleep(0.05)
-                if dist_km is None:
-                    dist_km = haversine_distance(o[0], o[1], d[0], d[1])
-            else:
-                dist_km = haversine_distance(o[0], o[1], d[0], d[1])
-
-            dist_dict[("hub", h["id"], "center", c["id"])] = dist_km
-
-    # If needed, farm->center direct or other combos can be added similarly.
+            roads = compute_all_roads(h["location"], c["location"])
+            dist_dict[("hub", h["id"], "center", c["id"])] = roads
 
     return dist_dict
