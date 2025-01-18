@@ -1,0 +1,99 @@
+{
+    "stage1_routes": [
+        {
+            "farm_id": 0,
+            "hub_id": 0,
+            "distance": 0.10560181948168229,
+            "cost": 0.14889856546917202,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 1,
+            "hub_id": 0,
+            "distance": 0.3546586074046965,
+            "cost": 0.5036152225146691,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 2,
+            "hub_id": 0,
+            "distance": 0.1196731056906074,
+            "cost": 0.16754234796685036,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 3,
+            "hub_id": 0,
+            "distance": 0.3044970668085511,
+            "cost": 0.4202059521958005,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 4,
+            "hub_id": 2,
+            "distance": 0.18988984919884902,
+            "cost": 0.2316656160225958,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 5,
+            "hub_id": 2,
+            "distance": 0.08703561097235085,
+            "cost": 0.11836843092239717,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 6,
+            "hub_id": 1,
+            "distance": 0.13697732724140071,
+            "cost": 0.16437279268968086,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 7,
+            "hub_id": 2,
+            "distance": 0.10439923862530986,
+            "cost": 0.1513788960066993,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 8,
+            "hub_id": 2,
+            "distance": 0.13606805998316265,
+            "cost": 0.19321664517609097,
+            "spoilage": 0
+        },
+        {
+            "farm_id": 9,
+            "hub_id": 1,
+            "distance": 0.05275800233561586,
+            "cost": 0.05275800233561586,
+            "spoilage": 0
+        }
+    ],
+    "stage2_routes": [
+        {
+            "hub_id": 0,
+            "center_id": 1,
+            "distance": 0.19352181634368193,
+            "cost": 0.19545703450711874,
+            "spoilage": 0
+        },
+        {
+            "hub_id": 1,
+            "center_id": 1,
+            "distance": 0.3404380930829262,
+            "cost": 0.5004439968319015,
+            "spoilage": 0
+        },
+        {
+            "hub_id": 2,
+            "center_id": 1,
+            "distance": 0.2515904495582074,
+            "cost": 0.3421630113991621,
+            "spoilage": 0
+        }
+    ],
+    "total_cost": 3.19,
+    "total_spoilage": 0
+}

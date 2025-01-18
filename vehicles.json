@@ -1,0 +1,30 @@
+[
+    {
+        "id": 0,
+        "type": "small",
+        "capacity": 1500,
+        "cost_per_km": 0.6,
+        "speed": 40
+    },
+    {
+        "id": 1,
+        "type": "small",
+        "capacity": 1500,
+        "cost_per_km": 0.6,
+        "speed": 40
+    },
+    {
+        "id": 2,
+        "type": "large",
+        "capacity": 3000,
+        "cost_per_km": 1.0,
+        "speed": 35
+    },
+    {
+        "id": 3,
+        "type": "large",
+        "capacity": 3000,
+        "cost_per_km": 1.0,
+        "speed": 35
+    }
+]

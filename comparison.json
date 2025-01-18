@@ -1,0 +1,14 @@
+[
+    {
+        "Method":"Baseline",
+        "TotalCost":3.19,
+        "Spoilage":0.0,
+        "RuntimeSec":"N\/A"
+    },
+    {
+        "Method":"Novel",
+        "TotalCost":6063.8,
+        "Spoilage":426.0,
+        "RuntimeSec":1.93
+    }
+]
