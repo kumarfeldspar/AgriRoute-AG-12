@@ -71,23 +71,23 @@ Additionally, we developed:
 
 ## Features
 
-1. _Novel Optimization Algorithm (250 Points)_
+1. _Novel Optimization Algorithm_
 
    - Implements a modified Genetic Algorithm to solve multi-stage logistical challenges.
    - Balances multiple objectives: cost minimization, spoilage reduction, and deadline compliance.
    - Adapts to dynamic constraints such as traffic and road closures.
 
-2. _Simulation and Dataset Generator (100 Points)_
+2. _Simulation and Dataset Generator_
 
    - Generate realistic supply chain data including farms, storage hubs, and distribution centers.
    - Customizable parameters for varying simulation complexity, such as perishability rates, vehicle capacities, and demand levels.
 
-3. _Algorithm Benchmarking and Performance Analysis (150 Points)_
+3. _Algorithm Benchmarking and Performance Analysis_
 
    - Compare our algorithm against baseline methods (e.g., greedy heuristics, linear programming).
    - Evaluate key metrics such as total cost, spoilage rate, and computational efficiency.
 
-4. _Interactive Visualization Dashboard (100 Points)_
+4. _Interactive Visualization Dashboard_
    - Visualize optimized routes with detailed maps and charts.
    - Display key performance metrics (e.g., total cost, spoilage, time taken) in an intuitive interface.
 
