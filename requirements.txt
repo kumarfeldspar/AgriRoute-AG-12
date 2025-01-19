@@ -4,3 +4,6 @@ pip install docplex
 # If using pulp + cplex solver:
 pip install pulp
 # Then separately install or configure CPLEX if needed.
+pip install python-dotenv
+pip install plotly  
+pip install matplotlib  
